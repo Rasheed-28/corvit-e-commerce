@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { ShoppingBag, Heart, User, Menu, Search, Sparkles } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ShoppingBag, Heart, User, Menu, Sparkles } from 'lucide-react';
 import { useCart } from '../../contexts/CartContext';
+import { useWishlist } from '../../contexts/WishlistContext';
+import { useAuth } from '../../hooks/useAuth';
 import { SearchInput } from '../common/SearchInput';
 import { MobileNavDrawer } from './MobileNavDrawer';
 
@@ -10,9 +12,12 @@ import { MobileNavDrawer } from './MobileNavDrawer';
  */
 export const Navbar = () => {
   const { totalItems, openCart, subtotal } = useCart();
+  const { totalWishlistItems } = useWishlist();
+  const { user, isAuthenticated } = useAuth();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const location = useLocation();
+  const navigate = useNavigate();
 
   const navLinks = [
     { label: 'Catalog', to: '/products' },
@@ -22,6 +27,13 @@ export const Navbar = () => {
     { label: 'Workspace', to: '/categories/workspace' },
     { label: 'Deals', to: '/deals', highlight: true },
   ];
+
+  const handleSearchSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (searchQuery.trim()) {
+      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
 
   return (
     <>
@@ -81,7 +93,7 @@ export const Navbar = () => {
             {/* Right: Search & Actions */}
             <div className="flex items-center gap-2 sm:gap-4 flex-1 justify-end max-w-md">
               {/* Search Bar (Desktop) */}
-              <div className="hidden md:block flex-1 max-w-xs">
+              <form onSubmit={handleSearchSubmit} className="hidden md:block flex-1 max-w-xs">
                 <SearchInput
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -89,26 +101,33 @@ export const Navbar = () => {
                   placeholder="Search products..."
                   size="sm"
                 />
-              </div>
+              </form>
 
               {/* Wishlist Icon */}
               <Link
                 to="/wishlist"
-                className="hidden sm:flex p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
-                aria-label="View saved wishlist"
+                className="relative p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+                aria-label={`View saved wishlist, ${totalWishlistItems} items`}
                 title="Wishlist"
               >
                 <Heart className="w-5 h-5" />
+                {totalWishlistItems > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-rose-500 text-white rounded-full shadow-xs">
+                    {totalWishlistItems}
+                  </span>
+                )}
               </Link>
 
               {/* User Account / Sign In */}
               <Link
-                to="/login"
+                to={isAuthenticated ? '/account' : '/login'}
                 className="hidden sm:flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 px-3 py-2 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
-                aria-label="Account sign in"
+                aria-label={isAuthenticated ? 'My Account' : 'Sign In'}
               >
                 <User className="w-4 h-4 text-gray-500" />
-                <span className="hidden xl:inline">Account</span>
+                <span className="hidden xl:inline">
+                  {isAuthenticated ? user?.first_name || 'Account' : 'Sign In'}
+                </span>
               </Link>
 
               {/* Shopping Cart Button */}
@@ -136,6 +155,7 @@ export const Navbar = () => {
         searchQuery={searchQuery}
         onSearchChange={(e) => setSearchQuery(e.target.value)}
         onSearchClear={() => setSearchQuery('')}
+        onSearchSubmit={handleSearchSubmit}
       />
     </>
   );

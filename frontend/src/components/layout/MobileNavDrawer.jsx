@@ -2,8 +2,10 @@ import React from 'react';
 import { Drawer } from '../common/Drawer';
 import { Link } from 'react-router-dom';
 import { SearchInput } from '../common/SearchInput';
-import { User, ShieldCheck, Heart, Sparkles, Phone, HelpCircle } from 'lucide-react';
+import { User, Heart, Sparkles, Phone } from 'lucide-react';
 import { MOCK_CATEGORIES } from '../../data/mockProducts';
+import { useWishlist } from '../../contexts/WishlistContext';
+import { useAuth } from '../../hooks/useAuth';
 
 /**
  * Mobile Navigation Drawer for phone and tablet viewports.
@@ -14,7 +16,11 @@ export const MobileNavDrawer = ({
   searchQuery,
   onSearchChange,
   onSearchClear,
+  onSearchSubmit,
 }) => {
+  const { totalWishlistItems } = useWishlist();
+  const { user, isAuthenticated } = useAuth();
+
   return (
     <Drawer
       isOpen={isOpen}
@@ -25,7 +31,12 @@ export const MobileNavDrawer = ({
     >
       <div className="space-y-6">
         {/* Search */}
-        <div>
+        <form
+          onSubmit={(e) => {
+            onClose();
+            if (onSearchSubmit) onSearchSubmit(e);
+          }}
+        >
           <SearchInput
             value={searchQuery}
             onChange={onSearchChange}
@@ -33,7 +44,7 @@ export const MobileNavDrawer = ({
             placeholder="Search catalog..."
             size="sm"
           />
-        </div>
+        </form>
 
         {/* Categories Section */}
         <div>
@@ -80,10 +91,17 @@ export const MobileNavDrawer = ({
             <Link
               to="/wishlist"
               onClick={onClose}
-              className="flex items-center gap-2.5 p-2.5 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
+              className="flex items-center justify-between p-2.5 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
             >
-              <Heart className="w-4 h-4 text-gray-500" />
-              <span>Saved Wishlist</span>
+              <div className="flex items-center gap-2.5">
+                <Heart className="w-4 h-4 text-gray-500" />
+                <span>Saved Wishlist</span>
+              </div>
+              {totalWishlistItems > 0 && (
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                  {totalWishlistItems}
+                </span>
+              )}
             </Link>
           </nav>
         </div>
@@ -91,12 +109,12 @@ export const MobileNavDrawer = ({
         {/* Account & Help */}
         <div className="pt-4 border-t border-gray-100 space-y-2">
           <Link
-            to="/login"
+            to={isAuthenticated ? '/account' : '/login'}
             onClick={onClose}
             className="flex items-center gap-2.5 p-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
           >
             <User className="w-4 h-4 text-gray-500" />
-            <span>Sign In / My Account</span>
+            <span>{isAuthenticated ? user?.first_name || 'My Account' : 'Sign In / Register'}</span>
           </Link>
           <a
             href="tel:+18005550199"

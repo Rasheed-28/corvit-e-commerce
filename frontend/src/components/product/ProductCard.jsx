@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Heart, Eye, ShoppingBag, Check } from 'lucide-react';
 import { Badge } from '../common/Badge';
 import { PriceDisplay } from '../common/PriceDisplay';
 import { RatingStars } from '../common/RatingStars';
 import { Button } from '../common/Button';
 import { useCart } from '../../contexts/CartContext';
-import { useNotification } from '../../contexts/NotificationContext';
+import { useWishlist } from '../../contexts/WishlistContext';
 
 /**
  * Premium, accessible Product Card component.
@@ -15,26 +16,21 @@ export const ProductCard = ({
   onQuickView,
   className = '',
 }) => {
-  const [isWishlisted, setIsWishlisted] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [justAdded, setJustAdded] = useState(false);
   const { addItem } = useCart();
-  const { notify } = useNotification();
+  const { isInWishlist, toggleWishlist } = useWishlist();
 
+  const isWishlisted = isInWishlist(product.id);
   const isOutOfStock = product.stock === 0;
   const isLowStock = product.stock > 0 && product.stock <= 5;
   const mainImage = product.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80';
+  const productUrl = `/products/${product.slug || product.id}`;
 
   const handleWishlistToggle = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const nextState = !isWishlisted;
-    setIsWishlisted(nextState);
-    if (nextState) {
-      notify.success(`Saved "${product.title}" to your wishlist.`, 'Wishlist');
-    } else {
-      notify.info(`Removed "${product.title}" from your wishlist.`, 'Wishlist');
-    }
+    toggleWishlist(product);
   };
 
   const handleAddToCart = (e) => {
@@ -69,15 +65,17 @@ export const ProductCard = ({
     >
       {/* Product Image Media Container */}
       <div className="relative aspect-[4/5] w-full overflow-hidden bg-gray-100">
-        <img
-          src={mainImage}
-          alt={product.title}
-          loading="lazy"
-          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 ease-out"
-        />
+        <Link to={productUrl} className="block w-full h-full">
+          <img
+            src={mainImage}
+            alt={product.title}
+            loading="lazy"
+            className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 ease-out"
+          />
+        </Link>
 
         {/* Top Badges Stack */}
-        <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5 items-start">
+        <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5 items-start pointer-events-none">
           {product.originalPrice && product.originalPrice > product.price && (
             <Badge variant="discount" size="sm">
               Sale -{Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)}%
@@ -132,7 +130,7 @@ export const ProductCard = ({
 
         {/* Out of Stock Backdrop Overlay */}
         {isOutOfStock && (
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center pointer-events-none">
             <span className="px-3.5 py-1.5 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-lg">
               Sold Out
             </span>
@@ -163,7 +161,7 @@ export const ProductCard = ({
 
           {/* Product Title */}
           <h3 className="font-semibold text-gray-900 text-sm sm:text-base leading-snug line-clamp-2 hover:text-emerald-700 transition-colors">
-            {product.title}
+            <Link to={productUrl}>{product.title}</Link>
           </h3>
 
           {/* Rating */}
