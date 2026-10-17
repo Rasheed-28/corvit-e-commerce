@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     # Third-party packages
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'django_filters',
     'corsheaders',
 
@@ -94,6 +95,8 @@ MEDIA_ROOT = BASE_DIR / 'media'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS & CSRF Defaults
+from corsheaders.defaults import default_headers
+
 CORS_ALLOW_CREDENTIALS = os.environ.get('CORS_ALLOW_CREDENTIALS', 'True').lower() in ('true', '1', 'yes')
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
@@ -105,10 +108,58 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.environ.get('CSRF_TRUSTED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',')
     if origin.strip()
 ]
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-csrftoken',
+]
+CORS_EXPOSE_HEADERS = [
+    'x-csrftoken',
+]
+
+# CSRF Cookie Settings
+CSRF_COOKIE_NAME = 'csrftoken'
+CSRF_COOKIE_HTTPONLY = False  # Allows React frontend to read csrftoken from document.cookie
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_PATH = '/'
+CSRF_COOKIE_DOMAIN = os.environ.get('CSRF_COOKIE_DOMAIN', None)
+CSRF_HEADER_NAME = 'HTTP_X_CSRFTOKEN'
+CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'False').lower() in ('true', '1', 'yes')
+
+# SimpleJWT and HttpOnly Auth Cookie Settings
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 30))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.environ.get('JWT_REFRESH_TOKEN_LIFETIME_DAYS', 7))),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+}
+
+AUTH_COOKIE_ACCESS_NAME = os.environ.get('JWT_ACCESS_COOKIE_NAME', os.environ.get('AUTH_COOKIE_ACCESS_NAME', 'access_token'))
+AUTH_COOKIE_REFRESH_NAME = os.environ.get('JWT_REFRESH_COOKIE_NAME', os.environ.get('AUTH_COOKIE_REFRESH_NAME', 'refresh_token'))
+AUTH_COOKIE_ACCESS_MAX_AGE = 60 * 30  # 30 minutes
+AUTH_COOKIE_REFRESH_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
+AUTH_COOKIE_HTTPONLY = True
+AUTH_COOKIE_SAMESITE = os.environ.get('JWT_COOKIE_SAMESITE', os.environ.get('AUTH_COOKIE_SAMESITE', 'Lax'))
+AUTH_COOKIE_PATH = '/'
+AUTH_COOKIE_DOMAIN = os.environ.get('AUTH_COOKIE_DOMAIN', None)
+AUTH_COOKIE_SECURE = os.environ.get('JWT_COOKIE_SECURE', os.environ.get('AUTH_COOKIE_SECURE', 'False')).lower() in ('true', '1', 'yes')
+
+# Application Domain Email & URL Settings
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@ecommerce.example.com')
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
 
 # Django REST Framework Settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        'apps.accounts.authentication.CookieJWTAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
@@ -132,4 +183,5 @@ REST_FRAMEWORK = {
 
 if DEBUG:
     REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'].append('rest_framework.renderers.BrowsableAPIRenderer')
+
 

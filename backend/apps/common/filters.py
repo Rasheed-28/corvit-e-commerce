@@ -6,7 +6,9 @@ class DjangoFilterBackend(BaseDjangoFilterBackend):
     OpenAPI 3.0 compatible DjangoFilterBackend.
     Implements get_schema_operation_parameters to provide complete query parameter
     metadata to DRF AutoSchema and Swagger/ReDoc documentation.
+    Strictly raises ValidationError on invalid filter parameters.
     """
+    raise_exception = True
 
     def get_schema_operation_parameters(self, view):
         try:

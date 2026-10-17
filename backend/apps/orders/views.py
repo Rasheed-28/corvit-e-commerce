@@ -165,14 +165,19 @@ class OrderListCreateView(generics.ListCreateAPIView):
         }, status=status.HTTP_201_CREATED)
 
 
-class OrderDetailView(generics.RetrieveAPIView):
+class OrderDetailView(generics.RetrieveUpdateAPIView):
     """
-    Retrieves full details for a specific order. Protected by ownership permission.
+    Retrieves full details for a specific order. Protected by customer ownership.
+    Status modification is strictly restricted to administrative staff (IsAdminUser).
     """
-    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
     serializer_class = OrderDetailSerializer
     lookup_field = 'order_number'
     queryset = Order.objects.all()
+
+    def get_permissions(self):
+        if self.request and self.request.method in ('PUT', 'PATCH'):
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated(), IsOwnerOrAdmin()]
 
     def get_queryset(self):
         if not self.request or not self.request.user.is_authenticated:
@@ -186,6 +191,30 @@ class OrderDetailView(generics.RetrieveAPIView):
         serializer = self.get_serializer(instance)
         return Response({
             'success': True,
+            'data': serializer.data
+        })
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        new_status = request.data.get('status')
+        if new_status:
+            if new_status not in Order.OrderStatus.values:
+                return Response({
+                    'success': False,
+                    'error': {
+                        'code': 'VALIDATION_ERROR',
+                        'message': f"Invalid status '{new_status}'. Allowed: {Order.OrderStatus.values}",
+                        'details': None
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+            instance.status = new_status
+            instance.save(update_fields=['status', 'updated_at'])
+
+        serializer = self.get_serializer(instance)
+        return Response({
+            'success': True,
+            'message': 'Order updated successfully.',
             'data': serializer.data
         })
 
