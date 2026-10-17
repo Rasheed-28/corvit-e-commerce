@@ -8,10 +8,29 @@ class HealthCheckTests(TestCase):
         self.client = APIClient()
 
     def test_health_check_endpoint(self):
-        url = reverse('health-check')
+        url = reverse('common:health-check')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
         self.assertEqual(response.data['data']['status'], 'healthy')
         self.assertEqual(response.data['data']['database'], 'connected')
         self.assertIn(response.data['data']['engine'], ['sqlite', 'postgresql'])
+
+    def test_openapi_schema_endpoint(self):
+        url = reverse('common:openapi-schema')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('openapi', response.data)
+
+    def test_swagger_ui_endpoint(self):
+        url = reverse('common:swagger-ui')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(b'swagger-ui', response.content)
+
+    def test_redoc_ui_endpoint(self):
+        url = reverse('common:redoc-ui')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(b'redoc', response.content)
+

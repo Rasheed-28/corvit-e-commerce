@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     # Third-party packages
     'rest_framework',
     'rest_framework_simplejwt',
+    'django_filters',
     'corsheaders',
 
     # Local Domain Apps
@@ -119,6 +120,11 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'apps.common.exceptions.custom_exception_handler',
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_FILTER_BACKENDS': [
+        'apps.common.filters.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
     ],
     'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%SZ',
     'NON_FIELD_ERRORS_KEY': 'non_field_errors',

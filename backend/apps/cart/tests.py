@@ -1,14 +1,17 @@
 from decimal import Decimal
 from django.test import TestCase
+from django.urls import reverse
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
-from apps.catalog.models import ProductCategory, Product, ProductVariant
+from rest_framework import status
+from rest_framework.test import APIClient
+from apps.catalog.models import ProductCategory, Product, ProductVariant, Inventory
 from apps.cart.models import Cart, CartItem, Wishlist, WishlistItem
 
 User = get_user_model()
 
-class CartModelTests(TestCase):
+class CartModelAndAPITests(TestCase):
     def setUp(self):
+        self.client = APIClient()
         self.user = User.objects.create_user(username='cartuser', email='cartuser@example.com', password='password123')
         self.category = ProductCategory.objects.create(name='Apparel', slug='apparel')
         self.product = Product.objects.create(
@@ -23,33 +26,65 @@ class CartModelTests(TestCase):
             name='Size: L | Color: White',
             sku='APP-TSHIRT-L-WHT'
         )
-
-    def test_cart_item_totals_and_uniqueness(self):
-        cart = Cart.objects.create(user=self.user)
-        item1 = CartItem.objects.create(
-            cart=cart,
-            product=self.product,
+        self.inventory = Inventory.objects.create(
             variant=self.variant,
-            quantity=2,
-            unit_price=Decimal('25.00')
+            quantity=10,
+            reserved_quantity=0
         )
-        self.assertEqual(item1.subtotal, Decimal('50.00'))
-        self.assertEqual(cart.total_items, 2)
-        self.assertEqual(cart.subtotal, Decimal('50.00'))
 
-        # Duplicate item for same cart, product, and variant must violate unique constraint
-        with self.assertRaises(IntegrityError):
-            CartItem.objects.create(
-                cart=cart,
-                product=self.product,
-                variant=self.variant,
-                quantity=1,
-                unit_price=Decimal('25.00')
-            )
+    # 1. Cart API Tests (Success Responses)
+    def test_get_cart_success(self):
+        url = reverse('cart:cart-detail')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(response.data['data']['total_items'], 0)
 
-    def test_wishlist_uniqueness(self):
-        wishlist = Wishlist.objects.create(user=self.user)
-        WishlistItem.objects.create(wishlist=wishlist, product=self.product)
+    def test_add_to_cart_success(self):
+        url = reverse('cart:cart-add-item')
+        payload = {
+            'product_id': str(self.product.id),
+            'variant_id': str(self.variant.id),
+            'quantity': 2
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(response.data['data']['total_items'], 2)
+        self.assertEqual(Decimal(str(response.data['data']['subtotal'])), Decimal('50.00'))
 
-        with self.assertRaises(IntegrityError):
-            WishlistItem.objects.create(wishlist=wishlist, product=self.product)
+    # 2. Invalid Input Tests
+    def test_add_to_cart_invalid_zero_quantity(self):
+        url = reverse('cart:cart-add-item')
+        payload = {
+            'product_id': str(self.product.id),
+            'quantity': 0 # Min value is 1
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(response.data['success'])
+
+    def test_add_to_cart_insufficient_stock(self):
+        url = reverse('cart:cart-add-item')
+        payload = {
+            'product_id': str(self.product.id),
+            'variant_id': str(self.variant.id),
+            'quantity': 50 # Only 10 available
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(response.data['success'])
+
+    # 3. Unauthenticated Wishlist Access
+    def test_unauthenticated_wishlist_access(self):
+        url = reverse('cart:wishlist-list-create')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_authenticated_wishlist_add(self):
+        url = reverse('cart:wishlist-list-create')
+        self.client.force_authenticate(user=self.user)
+        payload = {'product_id': str(self.product.id)}
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['success'])

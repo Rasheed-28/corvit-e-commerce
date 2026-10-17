@@ -6,6 +6,10 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/common/', include('apps.common.urls')),
+    path('api/v1/auth/', include('apps.accounts.urls')),
+    path('api/v1/catalog/', include('apps.catalog.urls')),
+    path('api/v1/cart/', include('apps.cart.urls')),
+    path('api/v1/orders/', include('apps.orders.urls')),
 ]
 
 # Serve media files in local development
