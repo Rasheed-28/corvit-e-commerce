@@ -29,6 +29,10 @@ INSTALLED_APPS = [
 
     # Local Domain Apps
     'apps.common',
+    'apps.accounts',
+    'apps.catalog',
+    'apps.cart',
+    'apps.orders',
 ]
 
 MIDDLEWARE = [
