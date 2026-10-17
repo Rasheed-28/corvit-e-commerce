@@ -1,15 +1,67 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/common/Button';
+import axiosClient from '../api/axiosClient';
+import { API_ROUTES } from '../utils/constants';
 
 export const HomePage = () => {
+  const [health, setHealth] = useState({ status: 'checking', message: 'Checking backend connectivity...' });
+
+  useEffect(() => {
+    let isMounted = true;
+    axiosClient.get(API_ROUTES.HEALTH)
+      .then((res) => {
+        if (isMounted) {
+          const data = res?.data || res;
+          setHealth({
+            status: data?.status === 'healthy' ? 'online' : 'degraded',
+            message: `Backend API: ${data?.status || 'online'} | DB: ${data?.database || 'connected'} | v${data?.version || '0.1.0'}`
+          });
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setHealth({
+            status: 'offline',
+            message: `Backend API offline or unreachable (${err.message || 'connection failed'})`
+          });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   return (
     <div className="space-y-12">
       {/* Hero Section */}
       <section className="bg-white rounded-2xl border border-gray-200 p-8 sm:p-12 shadow-sm text-center max-w-4xl mx-auto">
-        <span className="inline-block px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-100 rounded-full mb-4">
-          Production Architecture Foundation
-        </span>
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
+          <span className="inline-block px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-100 rounded-full">
+            Production Architecture Foundation
+          </span>
+          <span
+            className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full ${
+              health.status === 'online'
+                ? 'bg-green-100 text-green-800 border border-green-200'
+                : health.status === 'checking'
+                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                : 'bg-red-100 text-red-800 border border-red-200'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                health.status === 'online'
+                  ? 'bg-green-500 animate-pulse'
+                  : health.status === 'checking'
+                  ? 'bg-amber-500 animate-bounce'
+                  : 'bg-red-500'
+              }`}
+            />
+            {health.message}
+          </span>
+        </div>
         <h1 className="text-3xl sm:text-5xl font-extrabold text-gray-900 tracking-tight leading-tight">
           Modern Full-Stack E-Commerce Platform
         </h1>

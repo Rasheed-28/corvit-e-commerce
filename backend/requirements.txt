@@ -5,5 +5,5 @@ django-cors-headers>=4.4
 djangorestframework-simplejwt>=5.3
 psycopg>=3.2
 python-dotenv>=1.0
-# Note: Pillow is required for ImageField processing. If installing on Python 3.15 on Windows,
-# ensure Microsoft C++ Build Tools or a Python 3.11/3.12 runtime with prebuilt wheels is used.
+Pillow>=10.0.0
+
