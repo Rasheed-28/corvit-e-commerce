@@ -13,3 +13,5 @@ class HealthCheckTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
         self.assertEqual(response.data['data']['status'], 'healthy')
+        self.assertEqual(response.data['data']['database'], 'connected')
+        self.assertIn(response.data['data']['engine'], ['sqlite', 'postgresql'])

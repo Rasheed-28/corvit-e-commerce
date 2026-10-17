@@ -15,5 +15,6 @@ class SystemHealthService:
         return {
             'status': 'healthy' if db_status == 'connected' else 'unhealthy',
             'database': db_status,
+            'engine': connection.vendor,
             'version': '0.1.0',
         }
