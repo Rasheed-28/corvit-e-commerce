@@ -22,8 +22,9 @@ export const ProductCard = ({
   const { isInWishlist, toggleWishlist } = useWishlist();
 
   const isWishlisted = isInWishlist(product.id);
-  const isOutOfStock = product.stock === 0;
-  const isLowStock = product.stock > 0 && product.stock <= 5;
+  const isOutOfStock = product.stock === 0 || product.stock_status === 'out_of_stock';
+  const isUnavailable = product.is_available === false || product.stock_status === 'discontinued';
+  const isLowStock = !isOutOfStock && !isUnavailable && product.stock > 0 && product.stock <= 5;
   const mainImage = product.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80';
   const productUrl = `/products/${product.slug || product.id}`;
 
@@ -33,18 +34,19 @@ export const ProductCard = ({
     toggleWishlist(product);
   };
 
-  const handleAddToCart = (e) => {
+  const handleAddToCart = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isOutOfStock) return;
+    if (isOutOfStock || isUnavailable || isAdding) return;
 
     setIsAdding(true);
-    setTimeout(() => {
-      addItem(product, 1, product.colors?.[0]?.name || null);
-      setIsAdding(false);
+    try {
+      await addItem(product, 1, product.colors?.[0]?.name || null);
       setJustAdded(true);
       setTimeout(() => setJustAdded(false), 1500);
-    }, 300);
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   const handleQuickViewClick = (e) => {
@@ -76,17 +78,27 @@ export const ProductCard = ({
 
         {/* Top Badges Stack */}
         <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5 items-start pointer-events-none">
-          {product.originalPrice && product.originalPrice > product.price && (
+          {isUnavailable && (
+            <Badge variant="outline" size="sm" className="bg-white/90 text-gray-700 font-bold border-gray-400">
+              Unavailable
+            </Badge>
+          )}
+          {isOutOfStock && !isUnavailable && (
+            <Badge variant="danger" size="sm">
+              Sold Out
+            </Badge>
+          )}
+          {product.originalPrice && product.originalPrice > product.price && !isOutOfStock && !isUnavailable && (
             <Badge variant="discount" size="sm">
               Sale -{Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)}%
             </Badge>
           )}
-          {product.isNew && (
+          {product.isNew && !isOutOfStock && !isUnavailable && (
             <Badge variant="primary" size="sm">
               New
             </Badge>
           )}
-          {product.isBestseller && (
+          {product.isBestseller && !isOutOfStock && !isUnavailable && (
             <Badge variant="dark" size="sm">
               Bestseller
             </Badge>
@@ -198,8 +210,8 @@ export const ProductCard = ({
 
           <Button
             size="sm"
-            variant={justAdded ? 'subtle' : isOutOfStock ? 'outline' : 'primary'}
-            disabled={isOutOfStock}
+            variant={justAdded ? 'subtle' : isUnavailable || isOutOfStock ? 'outline' : 'primary'}
+            disabled={isOutOfStock || isUnavailable}
             isLoading={isAdding}
             onClick={handleAddToCart}
             leftIcon={
@@ -212,7 +224,7 @@ export const ProductCard = ({
             className="flex-shrink-0"
             aria-label={`Add ${product.title} to shopping cart`}
           >
-            {justAdded ? 'Added' : isOutOfStock ? 'Sold Out' : 'Add'}
+            {justAdded ? 'Added' : isUnavailable ? 'Unavailable' : isOutOfStock ? 'Sold Out' : 'Add'}
           </Button>
         </div>
       </div>

@@ -59,6 +59,12 @@ def custom_exception_handler(exc, context):
         if isinstance(response.data, dict) and 'detail' in response.data:
             message = str(response.data['detail'])
             details = None
+        elif isinstance(response.data, dict) and response.data:
+            first_val = next(iter(response.data.values()))
+            if isinstance(first_val, list) and len(first_val) > 0:
+                message = str(first_val[0])
+            elif isinstance(first_val, str):
+                message = first_val
 
         response.data = {
             'success': False,

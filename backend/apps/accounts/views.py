@@ -102,6 +102,15 @@ class LoginView(APIView):
         user = serializer.validated_data['user']
         update_last_login(None, user)
 
+        # Merge anonymous guest cart into user account if active
+        try:
+            from apps.cart.services import merge_guest_cart_into_user, get_cart_session_key
+            cart_session_key = get_cart_session_key(request)
+            if cart_session_key:
+                merge_guest_cart_into_user(cart_session_key, user)
+        except Exception:
+            pass
+
         refresh = RefreshToken.for_user(user)
         access_token = str(refresh.access_token)
         refresh_token = str(refresh)

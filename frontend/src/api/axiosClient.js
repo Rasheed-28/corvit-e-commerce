@@ -144,12 +144,27 @@ axiosClient.interceptors.response.use(
       }
     }
 
+    let message =
+      error.response?.data?.error?.message ||
+      (typeof error.response?.data?.detail === 'string' ? error.response.data.detail : null);
+
+    const details = error.response?.data?.error?.details || error.response?.data || null;
+
+    if ((!message || message === 'Invalid input provided.') && details && typeof details === 'object') {
+      const firstVal = Object.values(details)[0];
+      if (Array.isArray(firstVal) && firstVal.length > 0) {
+        message = String(firstVal[0]);
+      } else if (typeof firstVal === 'string') {
+        message = firstVal;
+      }
+    }
+
+    if (!message) {
+      message = error.message || 'An unexpected error occurred.';
+    }
+
     const normalizedError = {
-      message:
-        error.response?.data?.error?.message ||
-        (typeof error.response?.data?.detail === 'string' ? error.response.data.detail : null) ||
-        error.message ||
-        'An unexpected error occurred.',
+      message,
       code:
         error.response?.data?.error?.code ||
         (error.response?.status === 403
@@ -160,7 +175,7 @@ axiosClient.interceptors.response.use(
           ? 'NOT_FOUND'
           : 'UNKNOWN_ERROR'),
       status: error.response?.status,
-      details: error.response?.data?.error?.details || error.response?.data || null,
+      details,
     };
 
     return Promise.reject(normalizedError);

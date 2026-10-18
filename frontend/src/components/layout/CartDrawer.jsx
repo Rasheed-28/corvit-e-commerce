@@ -20,6 +20,7 @@ export const CartDrawer = () => {
     closeCart,
     updateQuantity,
     removeItem,
+    isItemUpdating,
   } = useCart();
 
   const FREE_SHIPPING_THRESHOLD = 100.00;
@@ -149,7 +150,8 @@ export const CartDrawer = () => {
                     <button
                       type="button"
                       onClick={() => removeItem(item.id, item.selectedVariant)}
-                      className="text-gray-400 hover:text-red-600 transition-colors p-1"
+                      disabled={isItemUpdating ? isItemUpdating(item.id) : false}
+                      className="text-gray-400 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors p-1"
                       aria-label={`Remove ${item.title} from cart`}
                     >
                       <Trash2 className="w-4 h-4" />
@@ -158,7 +160,13 @@ export const CartDrawer = () => {
 
                   {item.selectedVariant && (
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Color: <span className="font-medium text-gray-700">{item.selectedVariant}</span>
+                      Option: <span className="font-medium text-gray-700">{item.selectedVariant}</span>
+                    </p>
+                  )}
+
+                  {item.availableStock > 0 && item.availableStock <= 5 && (
+                    <p className="text-xs text-amber-600 font-medium mt-0.5">
+                      Only {item.availableStock} left
                     </p>
                   )}
 
@@ -169,6 +177,7 @@ export const CartDrawer = () => {
                       onChange={(qty) => updateQuantity(item.id, qty, item.selectedVariant)}
                       min={1}
                       max={item.maxStock || 10}
+                      disabled={isItemUpdating ? isItemUpdating(item.id) : false}
                     />
 
                     <PriceDisplay

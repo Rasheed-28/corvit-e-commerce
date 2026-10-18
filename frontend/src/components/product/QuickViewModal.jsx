@@ -43,19 +43,20 @@ export const QuickViewModal = ({
   const currentImage = images[selectedImageIndex] || images[0];
   const isOutOfStock = product.stock === 0;
 
-  const handleAddToCart = () => {
-    if (isOutOfStock) return;
+  const handleAddToCart = async () => {
+    if (isOutOfStock || isAdding) return;
     setIsAdding(true);
 
-    setTimeout(() => {
-      addItem(product, quantity, selectedColor);
-      setIsAdding(false);
+    try {
+      await addItem(product, quantity, selectedColor);
       setAdded(true);
       setTimeout(() => {
         setAdded(false);
         onClose();
       }, 1000);
-    }, 300);
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   return (

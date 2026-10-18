@@ -147,16 +147,17 @@ export const ProductDetailPage = () => {
     : ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80'];
   const activeImage = images[selectedImageIndex] || images[0];
 
-  const handleAddToCart = () => {
-    if (isOutOfStock) return;
+  const handleAddToCart = async () => {
+    if (isOutOfStock || isAdding) return;
     setIsAdding(true);
-    setTimeout(() => {
-      addItem(product, quantity, selectedColor);
-      setIsAdding(false);
+    try {
+      await addItem(product, quantity, selectedColor);
       setJustAdded(true);
       setTimeout(() => setJustAdded(false), 2000);
       openCart();
-    }, 250);
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   const handleReviewSubmit = async (e) => {

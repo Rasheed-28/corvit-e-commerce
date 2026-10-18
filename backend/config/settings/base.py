@@ -110,9 +110,13 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'x-csrftoken',
+    'x-cart-session',
+    'x-session-key',
 ]
 CORS_EXPOSE_HEADERS = [
     'x-csrftoken',
+    'x-cart-session',
+    'x-session-key',
 ]
 
 # CSRF Cookie Settings

@@ -21,7 +21,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { ordersApi } from '../api/ordersApi';
 
 export const CartPage = () => {
-  const { items, totalItems, subtotal, updateQuantity, removeItem, clearCart } = useCart();
+  const { items, totalItems, subtotal, updateQuantity, removeItem, clearCart, isItemUpdating } = useCart();
   const { notify } = useNotification();
 
   const [couponCode, setCouponCode] = useState('');
@@ -165,6 +165,16 @@ export const CartPage = () => {
                       <p className="text-xs text-gray-400 mt-0.5">
                         Unit Price: ${(item.price).toFixed(2)}
                       </p>
+                      {item.availableStock > 0 && item.availableStock <= 5 && (
+                        <p className="text-xs text-amber-600 font-semibold mt-1">
+                          Only {item.availableStock} left in stock!
+                        </p>
+                      )}
+                      {item.availableStock && item.quantity > item.availableStock && (
+                        <p className="text-xs text-rose-600 font-bold mt-1">
+                          Reduced stock: only {item.availableStock} available
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -174,6 +184,7 @@ export const CartPage = () => {
                       onChange={(qty) => updateQuantity(item.id, qty, item.selectedVariant)}
                       min={1}
                       max={item.maxStock || 10}
+                      disabled={isItemUpdating ? isItemUpdating(item.id) : false}
                       size="sm"
                     />
 
@@ -186,7 +197,8 @@ export const CartPage = () => {
                     <button
                       type="button"
                       onClick={() => removeItem(item.id, item.selectedVariant)}
-                      className="text-gray-400 hover:text-red-600 p-1.5 rounded-lg transition-colors"
+                      disabled={isItemUpdating ? isItemUpdating(item.id) : false}
+                      className="text-gray-400 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed p-1.5 rounded-lg transition-colors"
                       title="Remove item"
                     >
                       <Trash2 className="w-4 h-4" />
