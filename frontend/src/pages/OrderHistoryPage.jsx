@@ -15,21 +15,35 @@ import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { EmptyState } from '../components/common/EmptyState';
-import { mockOrdersApi } from '../api/mockAdapter';
+import { AlertBanner } from '../components/common/AlertBanner';
+import { ordersApi } from '../api/ordersApi';
 
 export const OrderHistoryPage = () => {
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState(null);
 
   useEffect(() => {
-    mockOrdersApi.getOrders()
+    setIsLoading(true);
+    setErrorMessage(null);
+    ordersApi
+      .getOrders()
       .then((res) => {
-        if (res?.success) setOrders(res.data);
+        if (res?.success && Array.isArray(res.data)) {
+          setOrders(res.data);
+        } else {
+          setOrders([]);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load orders:', err);
+        setErrorMessage(err.message || 'Unable to retrieve your order history.');
+        setOrders([]);
       })
       .finally(() => setIsLoading(false));
   }, []);
 
-  const getStatusBadge = (status) => {
+  const getStatusBadge = (status = '') => {
     switch (status.toLowerCase()) {
       case 'delivered':
         return <Badge variant="success" size="sm" dot>Delivered</Badge>;
@@ -87,7 +101,19 @@ export const OrderHistoryPage = () => {
         </Link>
       </div>
 
-      {orders.length === 0 ? (
+      {errorMessage && (
+        <AlertBanner variant="danger" onDismiss={() => setErrorMessage(null)}>
+          {errorMessage}
+        </AlertBanner>
+      )}
+
+      {isLoading ? (
+        <div className="space-y-4">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-32 skeleton-shimmer bg-gray-100 rounded-3xl" />
+          ))}
+        </div>
+      ) : orders.length === 0 ? (
         <EmptyState
           icon={<Package className="w-8 h-8 text-gray-400" />}
           title="No Orders Placed Yet"
@@ -101,76 +127,45 @@ export const OrderHistoryPage = () => {
           }
         />
       ) : (
-        <div className="space-y-6">
-          {orders.map((order) => (
+        <div className="space-y-4">
+          {orders.map((ord) => (
             <div
-              key={order.orderNumber}
-              className="bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden"
+              key={ord.id}
+              className="p-6 bg-white rounded-3xl border border-gray-200 shadow-xs hover:border-gray-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-6"
             >
-              {/* Order Meta Bar */}
-              <div className="p-4 sm:p-6 bg-gray-50/80 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
-                <div className="flex flex-wrap items-center gap-4 sm:gap-8 text-xs">
-                  <div>
-                    <span className="text-gray-400 block font-semibold uppercase text-[10px]">Order Number</span>
-                    <span className="font-mono font-bold text-gray-900 text-sm">{order.orderNumber}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-gray-400 block font-semibold uppercase text-[10px]">Date Placed</span>
-                    <span className="font-semibold text-gray-800">{order.date}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-gray-400 block font-semibold uppercase text-[10px]">Total Amount</span>
-                    <span className="font-bold text-gray-950 text-sm">${order.financials.total.toFixed(2)}</span>
-                  </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <span className="font-mono font-bold text-gray-900 text-sm">
+                    #{ord.orderNumber}
+                  </span>
+                  {getStatusBadge(ord.status)}
                 </div>
 
-                <div className="flex items-center gap-3">
-                  {getStatusBadge(order.status)}
-
-                  <Link to={`/account/orders/${order.orderNumber}`}>
-                    <Button variant="outline" size="sm" rightIcon={<ChevronRight className="w-3.5 h-3.5" />}>
-                      Details
-                    </Button>
-                  </Link>
+                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                  <span className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {ord.date}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5" />
+                    {ord.itemsCount} {ord.itemsCount === 1 ? 'item' : 'items'}
+                  </span>
                 </div>
               </div>
 
-              {/* Items Preview */}
-              <div className="p-4 sm:p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {order.items.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
-                      <img
-                        src={item.image}
-                        alt={item.title}
-                        className="w-16 h-16 rounded-xl object-cover bg-gray-100 border border-gray-200 flex-shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <h4 className="text-xs sm:text-sm font-bold text-gray-900 truncate">
-                          {item.title}
-                        </h4>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          Qty: {item.quantity} · ${(item.unitPrice).toFixed(2)}
-                          {item.variant ? ` · ${item.variant}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+              <div className="flex items-center justify-between md:justify-end gap-6 pt-4 md:pt-0 border-t md:border-t-0 border-gray-100">
+                <div className="text-right">
+                  <span className="text-xs text-gray-400 block">Total</span>
+                  <span className="text-lg font-black text-gray-950">
+                    ${ord.total.toFixed(2)}
+                  </span>
                 </div>
 
-                {order.trackingNumber && (
-                  <div className="pt-4 border-t border-gray-100 flex flex-wrap items-center justify-between text-xs text-gray-500">
-                    <span className="flex items-center gap-1.5 font-medium text-emerald-800">
-                      <Truck className="w-4 h-4 text-emerald-600" />
-                      {order.carrier}: <code className="font-mono text-gray-800">{order.trackingNumber}</code>
-                    </span>
-                    <span className="text-gray-400">
-                      Delivered/Expected: {order.estimatedDelivery}
-                    </span>
-                  </div>
-                )}
+                <Link to={`/account/orders/${ord.orderNumber}`}>
+                  <Button variant="outline" size="sm" rightIcon={<ChevronRight className="w-4 h-4" />}>
+                    View Details
+                  </Button>
+                </Link>
               </div>
             </div>
           ))}

@@ -1,11 +1,18 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Drawer } from '../common/Drawer';
 import { Link } from 'react-router-dom';
 import { SearchInput } from '../common/SearchInput';
 import { User, Heart, Sparkles, Phone } from 'lucide-react';
-import { MOCK_CATEGORIES } from '../../data/mockProducts';
+import { catalogApi } from '../../api/catalogApi';
 import { useWishlist } from '../../contexts/WishlistContext';
 import { useAuth } from '../../hooks/useAuth';
+
+const DEFAULT_CATEGORIES = [
+  { id: 1, name: 'Audio', slug: 'audio' },
+  { id: 2, name: 'Wearables', slug: 'wearables' },
+  { id: 3, name: 'Lifestyle', slug: 'lifestyle' },
+  { id: 4, name: 'Workspace', slug: 'workspace' },
+];
 
 /**
  * Mobile Navigation Drawer for phone and tablet viewports.
@@ -20,6 +27,22 @@ export const MobileNavDrawer = ({
 }) => {
   const { totalWishlistItems } = useWishlist();
   const { user, isAuthenticated } = useAuth();
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+
+  useEffect(() => {
+    let mounted = true;
+    catalogApi
+      .getCategories()
+      .then((res) => {
+        if (mounted && res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          setCategories(res.data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <Drawer
@@ -60,15 +83,15 @@ export const MobileNavDrawer = ({
               <span>All Products</span>
               <span className="text-xs text-gray-400">View All</span>
             </Link>
-            {MOCK_CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <Link
-                key={cat.id}
+                key={cat.id || cat.slug}
                 to={`/categories/${cat.slug}`}
                 onClick={onClose}
                 className="flex items-center justify-between p-2.5 rounded-xl font-medium text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
               >
                 <span>{cat.name}</span>
-                <span className="text-xs text-gray-400">{cat.itemCount}</span>
+                {cat.itemCount ? <span className="text-xs text-gray-400">{cat.itemCount}</span> : null}
               </Link>
             ))}
           </nav>

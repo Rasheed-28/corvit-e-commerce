@@ -19,7 +19,7 @@ import { EmptyState } from '../components/common/EmptyState';
 import { PriceDisplay } from '../components/common/PriceDisplay';
 import { useCart } from '../contexts/CartContext';
 import { useNotification } from '../contexts/NotificationContext';
-import { mockOrdersApi } from '../api/mockAdapter';
+import { ordersApi } from '../api/ordersApi';
 
 export const OrderDetailPage = () => {
   const { orderNumber } = useParams();
@@ -34,12 +34,17 @@ export const OrderDetailPage = () => {
     setIsLoading(true);
     setNotFound(false);
 
-    mockOrdersApi.getOrder(orderNumber)
+    ordersApi
+      .getOrder(orderNumber)
       .then((res) => {
-        if (res?.success) setOrder(res.data);
+        if (res?.success && res.data) {
+          setOrder(res.data);
+        } else {
+          setNotFound(true);
+        }
       })
       .catch((err) => {
-        console.error(err);
+        console.error('Failed to load order details:', err);
         setNotFound(true);
       })
       .finally(() => setIsLoading(false));
@@ -138,7 +143,7 @@ export const OrderDetailPage = () => {
                   {step.completed ? <CheckCircle2 className="w-5 h-5" /> : idx + 1}
                 </div>
                 <span className={`text-xs font-bold ${step.completed ? 'text-gray-900' : 'text-gray-400'}`}>
-                  {step.status}
+                  {step.title}
                 </span>
               </div>
               <span className="text-[11px] text-gray-500 pl-10 sm:pl-0 sm:mt-1">
@@ -149,112 +154,89 @@ export const OrderDetailPage = () => {
         </div>
       </div>
 
-      {/* Items & Financials Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Purchased Items Table (8 Cols) */}
-        <div className="lg:col-span-8 bg-white rounded-3xl border border-gray-200 p-6 sm:p-8 shadow-xs space-y-6">
-          <h3 className="font-bold text-gray-900 text-base">Purchased Items</h3>
+      {/* Order Items & Financials Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+        {/* Items List (2 cols) */}
+        <div className="lg:col-span-2 bg-white rounded-3xl border border-gray-200 p-6 sm:p-8 shadow-xs space-y-6">
+          <h3 className="font-bold text-gray-900 text-base">Ordered Pieces</h3>
 
           <div className="divide-y divide-gray-100">
-            {order.items.map((item, idx) => (
-              <div key={idx} className="py-4 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
+            {order.items.map((item) => (
+              <div key={item.id} className="py-4 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
-                  <img
-                    src={item.image}
-                    alt={item.title}
-                    className="w-16 h-16 rounded-xl object-cover bg-gray-100 border border-gray-200 flex-shrink-0"
-                  />
+                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 flex-shrink-0">
+                    <img src={item.image} alt={item.title} className="w-full h-full object-cover" />
+                  </div>
                   <div>
-                    <h4 className="font-bold text-sm text-gray-900">
-                      {item.title}
-                    </h4>
+                    <h4 className="text-sm font-bold text-gray-900">{item.title}</h4>
                     {item.variant && (
-                      <p className="text-xs text-gray-500 mt-0.5">Option: {item.variant}</p>
+                      <span className="text-xs text-gray-500 block">Variant: {item.variant}</span>
                     )}
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Qty: {item.quantity} × ${(item.unitPrice).toFixed(2)}
-                    </p>
+                    <span className="text-xs text-gray-400">Qty: {item.quantity}</span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4">
-                  <span className="font-bold text-gray-950 text-sm">
-                    ${(item.unitPrice * item.quantity).toFixed(2)}
+                <div className="text-right">
+                  <span className="text-sm font-black text-gray-900">
+                    ${(item.price * item.quantity).toFixed(2)}
                   </span>
-
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    onClick={() => {
-                      addItem(item, 1, item.variant);
-                      notify.success(`Added "${item.title}" back into your bag.`, 'Reordered');
-                      openCart();
-                    }}
-                  >
-                    Buy Again
-                  </Button>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Financial Breakdown & Address (4 Cols) */}
-        <div className="lg:col-span-4 space-y-6">
-          {/* Financial Breakdown */}
-          <div className="p-6 bg-white rounded-3xl border border-gray-200 shadow-xs space-y-4">
-            <h3 className="font-bold text-gray-900 text-base pb-3 border-b border-gray-100">
-              Payment Summary
-            </h3>
+        {/* Cost Summary & Address (1 col) */}
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl border border-gray-200 p-6 shadow-xs space-y-4">
+            <h3 className="font-bold text-gray-900 text-base">Payment & Totals</h3>
 
-            <div className="space-y-2.5 text-xs text-gray-600">
+            <div className="space-y-2 text-xs text-gray-600 border-b border-gray-100 pb-4">
               <div className="flex justify-between">
                 <span>Subtotal</span>
-                <span className="font-medium text-gray-900">${order.financials.subtotal.toFixed(2)}</span>
+                <span className="font-semibold text-gray-900">${order.financials.subtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Shipping</span>
-                <span className="font-medium text-emerald-600">
+                <span className="font-semibold text-gray-900">
                   {order.financials.shipping === 0 ? 'FREE' : `$${order.financials.shipping.toFixed(2)}`}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Estimated Tax</span>
-                <span className="font-medium text-gray-900">${order.financials.tax.toFixed(2)}</span>
+                <span>Tax</span>
+                <span className="font-semibold text-gray-900">${order.financials.tax.toFixed(2)}</span>
               </div>
               {order.financials.discount > 0 && (
-                <div className="flex justify-between text-emerald-700 font-semibold">
+                <div className="flex justify-between text-emerald-600">
                   <span>Discount</span>
                   <span>-${order.financials.discount.toFixed(2)}</span>
                 </div>
               )}
-              <div className="pt-3 border-t border-gray-100 flex justify-between items-baseline text-sm font-bold text-gray-900">
-                <span>Total Paid</span>
-                <span className="text-xl font-black text-gray-950">${order.financials.total.toFixed(2)}</span>
-              </div>
+            </div>
+
+            <div className="flex justify-between items-baseline pt-2">
+              <span className="text-sm font-bold text-gray-900">Order Total</span>
+              <span className="text-xl font-black text-emerald-700">
+                ${order.financials.total.toFixed(2)}
+              </span>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100 flex items-center gap-3 text-xs text-gray-500">
+              <CreditCard className="w-4 h-4 text-emerald-600" />
+              <span>{order.paymentMethod}</span>
             </div>
           </div>
 
-          {/* Delivery & Payment Info */}
-          <div className="p-6 bg-white rounded-3xl border border-gray-200 shadow-xs space-y-4 text-xs">
-            <div>
-              <h4 className="font-bold text-gray-900 mb-1 flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                Shipping Destination
-              </h4>
-              <p className="font-semibold text-gray-800">{order.shippingAddress.fullName}</p>
-              <p className="text-gray-500">{order.shippingAddress.street}</p>
-              <p className="text-gray-500">{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}</p>
+          <div className="bg-white rounded-3xl border border-gray-200 p-6 shadow-xs space-y-3">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-emerald-600" />
+              <h3 className="font-bold text-gray-900 text-sm">Shipping Destination</h3>
             </div>
-
-            <div className="pt-3 border-t border-gray-100">
-              <h4 className="font-bold text-gray-900 mb-1 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
-                Payment Method
-              </h4>
-              <p className="text-gray-600">
-                {order.paymentMethod.type} ending in <span className="font-mono font-bold text-gray-900">*{order.paymentMethod.last4}</span>
-              </p>
+            <div className="text-xs text-gray-600 space-y-0.5">
+              <p className="font-semibold text-gray-900">{order.shippingAddress.name}</p>
+              <p>{order.shippingAddress.street}</p>
+              <p>{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}</p>
+              <p>{order.shippingAddress.country}</p>
             </div>
           </div>
         </div>

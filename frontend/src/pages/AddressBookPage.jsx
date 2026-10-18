@@ -17,14 +17,16 @@ import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { Checkbox } from '../components/common/Checkbox';
 import { EmptyState } from '../components/common/EmptyState';
+import { AlertBanner } from '../components/common/AlertBanner';
 import { useNotification } from '../contexts/NotificationContext';
-import { mockAccountApi } from '../api/mockAdapter';
+import authApi from '../api/authApi';
 
 export const AddressBookPage = () => {
   const [addresses, setAddresses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
   const { notify } = useNotification();
 
   const initialForm = {
@@ -43,9 +45,19 @@ export const AddressBookPage = () => {
 
   const fetchAddresses = () => {
     setIsLoading(true);
-    mockAccountApi.getAddresses()
+    setErrorMessage(null);
+    authApi
+      .getAddresses()
       .then((res) => {
-        if (res?.success) setAddresses(res.data);
+        if (res?.success && Array.isArray(res.data)) {
+          setAddresses(res.data);
+        } else {
+          setAddresses([]);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load addresses:', err);
+        setErrorMessage(err.message || 'Unable to retrieve your saved addresses.');
       })
       .finally(() => setIsLoading(false));
   };
@@ -54,32 +66,43 @@ export const AddressBookPage = () => {
     fetchAddresses();
   }, []);
 
-  const handleAddSubmit = (e) => {
+  const handleAddSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setErrorMessage(null);
 
-    mockAccountApi.addAddress(formData)
-      .then(() => {
-        notify.success('New delivery address saved.', 'Address Added');
-        setIsModalOpen(false);
-        setFormData(initialForm);
-        fetchAddresses();
-      })
-      .finally(() => setIsSubmitting(false));
+    try {
+      await authApi.addAddress(formData);
+      notify.success('New delivery address saved.', 'Address Added');
+      setIsModalOpen(false);
+      setFormData(initialForm);
+      fetchAddresses();
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to save address. Please check required fields.');
+      notify.error(err.message || 'Failed to save address.', 'Address Error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDelete = (id) => {
-    mockAccountApi.deleteAddress(id).then(() => {
+  const handleDelete = async (id) => {
+    try {
+      await authApi.deleteAddress(id);
       notify.info('Address removed from your book.', 'Address Deleted');
       fetchAddresses();
-    });
+    } catch (err) {
+      notify.error(err.message || 'Could not delete address.', 'Error');
+    }
   };
 
-  const handleSetDefault = (id) => {
-    mockAccountApi.setDefaultAddress(id).then(() => {
+  const handleSetDefault = async (id) => {
+    try {
+      await authApi.setDefaultAddress(id);
       notify.success('Primary delivery address updated.', 'Default Address');
       fetchAddresses();
-    });
+    } catch (err) {
+      notify.error(err.message || 'Could not update default address.', 'Error');
+    }
   };
 
   return (
@@ -99,14 +122,17 @@ export const AddressBookPage = () => {
             Address Book
           </h1>
           <p className="text-xs text-gray-500 mt-1">
-            Manage your delivery and billing locations for accelerated checkout
+            Manage your verified shipping destinations and billing defaults
           </p>
         </div>
 
         <Button
           variant="primary"
-          size="md"
-          onClick={() => setIsModalOpen(true)}
+          size="sm"
+          onClick={() => {
+            setFormData(initialForm);
+            setIsModalOpen(true);
+          }}
           leftIcon={<Plus className="w-4 h-4" />}
         >
           Add New Address
@@ -138,15 +164,32 @@ export const AddressBookPage = () => {
         </Link>
       </div>
 
-      {/* Addresses Grid */}
-      {addresses.length === 0 ? (
+      {errorMessage && (
+        <AlertBanner variant="danger" onDismiss={() => setErrorMessage(null)}>
+          {errorMessage}
+        </AlertBanner>
+      )}
+
+      {/* Address Grid */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-48 skeleton-shimmer bg-gray-100 rounded-3xl" />
+          ))}
+        </div>
+      ) : addresses.length === 0 ? (
         <EmptyState
-          icon={<MapPin className="w-8 h-8 text-gray-400" />}
-          title="No Addresses Saved"
-          description="You don't have any shipping addresses on file. Add your primary home or office address to speed up checkout."
+          icon={<MapPin className="w-10 h-10 text-gray-400" />}
+          title="No addresses on file"
+          description="You haven't saved any delivery destinations yet. Add one below to expedite checkout."
           action={
-            <Button variant="primary" size="md" onClick={() => setIsModalOpen(true)}>
-              Add Address
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => setIsModalOpen(true)}
+              leftIcon={<Plus className="w-4 h-4" />}
+            >
+              Add First Address
             </Button>
           }
         />
@@ -155,53 +198,59 @@ export const AddressBookPage = () => {
           {addresses.map((addr) => (
             <div
               key={addr.id}
-              className={`p-6 bg-white rounded-3xl border shadow-xs flex flex-col justify-between space-y-4 transition-all ${
-                addr.isDefault ? 'border-emerald-600 ring-2 ring-emerald-500/10' : 'border-gray-200'
+              className={`p-6 rounded-3xl border transition-all relative flex flex-col justify-between ${
+                addr.isDefault
+                  ? 'border-emerald-500 bg-emerald-50/20 shadow-xs'
+                  : 'border-gray-200 bg-white hover:border-gray-300'
               }`}
             >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="p-2 rounded-xl bg-gray-100 text-gray-700">
-                      <MapPin className="w-4 h-4" />
-                    </span>
-                    <h3 className="font-bold text-sm text-gray-900">{addr.label}</h3>
+                    {addr.label === 'Home' ? (
+                      <Home className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Building className="w-4 h-4 text-emerald-600" />
+                    )}
+                    <span className="font-bold text-gray-900 text-sm">{addr.label}</span>
                   </div>
-
                   {addr.isDefault && (
-                    <Badge variant="success" size="sm" dot>Default</Badge>
+                    <Badge variant="success" size="sm">
+                      Default
+                    </Badge>
                   )}
                 </div>
 
-                <div className="text-xs text-gray-600 space-y-1 leading-relaxed">
-                  <p className="font-bold text-gray-900 text-sm">{addr.recipientName}</p>
+                <div className="text-xs text-gray-600 space-y-1">
+                  <p className="font-semibold text-gray-900 text-sm">{addr.recipientName}</p>
                   <p>{addr.streetAddress}</p>
-                  <p>{addr.city}, {addr.state} {addr.postalCode}</p>
+                  {addr.streetAddress2 && <p>{addr.streetAddress2}</p>}
+                  <p>
+                    {addr.city}, {addr.state} {addr.postalCode}
+                  </p>
                   <p>{addr.country}</p>
-                  <p className="pt-1 text-gray-400 font-mono">Phone: {addr.phone}</p>
+                  {addr.phone && <p className="text-gray-500 pt-1">Tel: {addr.phone}</p>}
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+              <div className="pt-4 mt-4 border-t border-gray-100 flex items-center justify-between text-xs">
                 {!addr.isDefault ? (
                   <button
                     type="button"
                     onClick={() => handleSetDefault(addr.id)}
-                    className="font-semibold text-emerald-600 hover:text-emerald-800"
+                    className="font-semibold text-emerald-600 hover:text-emerald-700 transition-colors"
                   >
-                    Set as Default
+                    Set as default
                   </button>
                 ) : (
-                  <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Primary
-                  </span>
+                  <span className="text-gray-400 font-medium">Primary address</span>
                 )}
 
                 <button
                   type="button"
                   onClick={() => handleDelete(addr.id)}
-                  className="text-gray-400 hover:text-red-600 p-1 transition-colors"
-                  title="Delete address"
+                  aria-label="Delete address"
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -215,22 +264,21 @@ export const AddressBookPage = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Add New Delivery Address"
-        description="Enter recipient and destination details"
-        size="lg"
+        title="Add New Address"
+        size="md"
       >
         <form onSubmit={handleAddSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="Address Label"
-              placeholder="e.g. Home, Studio, Vacation"
+              placeholder="e.g. Home, Office"
               value={formData.label}
               onChange={(e) => setFormData({ ...formData, label: e.target.value })}
               required
             />
             <Input
-              label="Recipient Full Name"
-              placeholder="e.g. Alex Reynolds"
+              label="Recipient Name"
+              placeholder="Full legal name"
               value={formData.recipientName}
               onChange={(e) => setFormData({ ...formData, recipientName: e.target.value })}
               required
@@ -239,61 +287,59 @@ export const AddressBookPage = () => {
 
           <Input
             label="Street Address"
-            placeholder="e.g. 742 Evergreen Terrace, Suite 4B"
+            placeholder="123 Market St, Suite 400"
             value={formData.streetAddress}
             onChange={(e) => setFormData({ ...formData, streetAddress: e.target.value })}
             required
           />
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <Input
               label="City"
-              placeholder="Seattle"
+              placeholder="San Francisco"
               value={formData.city}
               onChange={(e) => setFormData({ ...formData, city: e.target.value })}
               required
             />
             <Input
               label="State / Province"
-              placeholder="WA"
+              placeholder="CA"
               value={formData.state}
               onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-              required
-            />
-            <Input
-              label="Postal / ZIP Code"
-              placeholder="98101"
-              value={formData.postalCode}
-              onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
               required
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="Country"
-              value={formData.country}
-              onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+              label="Postal / ZIP Code"
+              placeholder="94105"
+              value={formData.postalCode}
+              onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
               required
             />
             <Input
-              label="Contact Phone"
-              placeholder="+1 (555) 234-5678"
+              label="Phone Number"
+              placeholder="+1 (555) 000-0000"
               value={formData.phone}
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              required
             />
           </div>
 
           <Checkbox
-            id="default-addr-chk"
-            label="Set as default shipping address"
+            id="make-default"
+            label="Set as default delivery address"
             checked={formData.isDefault}
             onChange={(e) => setFormData({ ...formData, isDefault: e.target.checked })}
           />
 
-          <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
-            <Button variant="ghost" size="md" onClick={() => setIsModalOpen(false)}>
+          <div className="pt-4 flex justify-end gap-3 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={() => setIsModalOpen(false)}
+            >
               Cancel
             </Button>
             <Button type="submit" variant="primary" size="md" isLoading={isSubmitting}>

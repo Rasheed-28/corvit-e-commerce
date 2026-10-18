@@ -18,21 +18,23 @@ import { RatingStars } from '../components/common/RatingStars';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { QuantityPicker } from '../components/common/QuantityPicker';
-import { ProductCardSkeleton } from '../components/product/ProductCardSkeleton';
 import { ProductGrid } from '../components/product/ProductGrid';
 import { EmptyState } from '../components/common/EmptyState';
 import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
+import { AlertBanner } from '../components/common/AlertBanner';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
 import { useNotification } from '../contexts/NotificationContext';
-import { mockCatalogApi } from '../api/mockAdapter';
+import { useAuth } from '../hooks/useAuth';
+import { catalogApi } from '../api/catalogApi';
 
 export const ProductDetailPage = () => {
   const { slug } = useParams();
   const { addItem, openCart } = useCart();
   const { isInWishlist, toggleWishlist } = useWishlist();
   const { notify } = useNotification();
+  const { isAuthenticated, user } = useAuth();
 
   // Component State
   const [product, setProduct] = useState(null);
@@ -48,9 +50,10 @@ export const ProductDetailPage = () => {
   // Review Form Modal State
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewRating, setReviewRating] = useState(5);
-  const [reviewName, setReviewName] = useState('');
+  const [reviewTitle, setReviewTitle] = useState('');
   const [reviewComment, setReviewComment] = useState('');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState(null);
   const [reviewsList, setReviewsList] = useState([]);
 
   useEffect(() => {
@@ -60,42 +63,40 @@ export const ProductDetailPage = () => {
     setQuantity(1);
     setJustAdded(false);
 
-    mockCatalogApi.getProduct(slug)
+    catalogApi
+      .getProduct(slug)
       .then((res) => {
-        if (res?.success) {
+        if (res?.success && res.data) {
           const prod = res.data;
           setProduct(prod);
           setSelectedColor(prod.colors?.[0]?.name || null);
 
-          // Seed default reviews for this product
-          setReviewsList([
-            {
-              id: 'rev-1',
-              author: 'Marcus Vance',
-              rating: 5,
-              date: '2026-10-12',
-              comment: 'Exceptional build quality and audio fidelity. Easily the best purchase I made this quarter.',
-            },
-            {
-              id: 'rev-2',
-              author: 'Sophia Lin',
-              rating: 4,
-              date: '2026-09-28',
-              comment: 'Super sleek design, battery life exceeded my expectations. Shipping was within 2 days.',
-            },
-          ]);
+          // Populate real reviews from product model
+          const mappedReviews = (prod.reviews || []).map((r) => ({
+            id: r.id,
+            author: r.user
+              ? `${r.user.first_name || ''} ${r.user.last_name || ''}`.trim() || r.user.username
+              : 'Verified Customer',
+            rating: r.rating,
+            date: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Recent',
+            title: r.title,
+            comment: r.comment,
+          }));
+          setReviewsList(mappedReviews);
 
-          // Fetch related products
-          return mockCatalogApi.getRelatedProducts(prod.slug, prod.categorySlug, 4);
+          // Fetch related products from backend
+          return catalogApi.getRelatedProducts(prod.slug, prod.categorySlug, 4);
+        } else {
+          setNotFound(true);
         }
       })
       .then((res) => {
-        if (res?.success) {
+        if (res?.success && Array.isArray(res.data)) {
           setRelatedProducts(res.data);
         }
       })
       .catch((err) => {
-        console.error(err);
+        console.error('Failed to load product detail:', err);
         setNotFound(true);
       })
       .finally(() => {
@@ -158,29 +159,58 @@ export const ProductDetailPage = () => {
     }, 250);
   };
 
-  const handleReviewSubmit = (e) => {
+  const handleReviewSubmit = async (e) => {
     e.preventDefault();
-    if (!reviewName.trim() || !reviewComment.trim()) {
-      notify.error('Please fill in your name and comment.', 'Review Incomplete');
+    setReviewError(null);
+
+    if (!isAuthenticated) {
+      setReviewError('You must be signed in to submit a product review.');
+      notify.error('Please sign in to write a review.', 'Authentication Required');
+      return;
+    }
+
+    if (!reviewTitle.trim() || !reviewComment.trim()) {
+      setReviewError('Please provide a title and comment for your review.');
       return;
     }
 
     setIsSubmittingReview(true);
-    mockCatalogApi.addReview(product.slug, {
-      author: reviewName,
-      rating: reviewRating,
-      comment: reviewComment,
-    })
-      .then((res) => {
-        setReviewsList((prev) => [res.data, ...prev]);
+    try {
+      const res = await catalogApi.addReview(product.slug, {
+        rating: reviewRating,
+        title: reviewTitle.trim(),
+        comment: reviewComment.trim(),
+      });
+
+      if (res?.success) {
         notify.success('Thank you for submitting your review!', 'Review Published');
         setIsReviewModalOpen(false);
-        setReviewName('');
+        setReviewTitle('');
         setReviewComment('');
-      })
-      .finally(() => {
-        setIsSubmittingReview(false);
-      });
+
+        // Refresh reviews list
+        const updated = await catalogApi.getProduct(product.slug);
+        if (updated?.data?.reviews) {
+          const mappedReviews = updated.data.reviews.map((r) => ({
+            id: r.id,
+            author: r.user
+              ? `${r.user.first_name || ''} ${r.user.last_name || ''}`.trim() || r.user.username
+              : 'Verified Customer',
+            rating: r.rating,
+            date: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Recent',
+            title: r.title,
+            comment: r.comment,
+          }));
+          setReviewsList(mappedReviews);
+        }
+      }
+    } catch (err) {
+      const msg = err.message || 'Failed to submit review. Each customer can review a product once.';
+      setReviewError(msg);
+      notify.error(msg, 'Review Submission Failed');
+    } finally {
+      setIsSubmittingReview(false);
+    }
   };
 
   return (
@@ -270,7 +300,7 @@ export const ProductDetailPage = () => {
             <div className="mt-3 flex items-center gap-3">
               <RatingStars rating={product.rating} reviewCount={product.reviewCount} size="sm" />
               <a href="#reviews" className="text-xs font-semibold text-emerald-600 hover:underline">
-                Read all reviews
+                Read all reviews ({reviewsList.length})
               </a>
             </div>
           </div>
@@ -391,23 +421,6 @@ export const ProductDetailPage = () => {
         </div>
       </div>
 
-      {/* Specifications & Highlights */}
-      {product.features && product.features.length > 0 && (
-        <section className="bg-white rounded-3xl border border-gray-200 p-8 shadow-xs">
-          <h3 className="text-xl font-bold text-gray-900 mb-4">
-            Technical Architecture & Features
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {product.features.map((feat, idx) => (
-              <div key={idx} className="p-4 rounded-xl bg-gray-50 border border-gray-100 flex items-start gap-3">
-                <Check className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                <span className="text-xs font-semibold text-gray-800">{feat}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* Customer Reviews Section */}
       <section id="reviews" className="space-y-6 pt-6 border-t border-gray-200">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -416,14 +429,17 @@ export const ProductDetailPage = () => {
               Customer Feedback & Reviews
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Verified community experiences with this piece
+              Verified community experiences with this piece ({reviewsList.length} reviews)
             </p>
           </div>
 
           <Button
             variant="outline"
             size="md"
-            onClick={() => setIsReviewModalOpen(true)}
+            onClick={() => {
+              setReviewError(null);
+              setIsReviewModalOpen(true);
+            }}
             leftIcon={<MessageSquarePlus className="w-4 h-4" />}
           >
             Write a Review
@@ -431,28 +447,36 @@ export const ProductDetailPage = () => {
         </div>
 
         {/* Reviews List */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {reviewsList.map((rev) => (
-            <div
-              key={rev.id}
-              className="p-5 bg-white rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between space-y-3"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <RatingStars rating={rev.rating} size="xs" showScore={false} />
-                  <span className="text-[11px] text-gray-400">{rev.date}</span>
+        {reviewsList.length === 0 ? (
+          <div className="p-8 bg-gray-50 rounded-2xl border border-gray-200 text-center space-y-2">
+            <p className="text-sm font-semibold text-gray-700">No reviews yet for this product.</p>
+            <p className="text-xs text-gray-500">Be the first to share your thoughts!</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {reviewsList.map((rev) => (
+              <div
+                key={rev.id}
+                className="p-5 bg-white rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between space-y-3"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <RatingStars rating={rev.rating} size="xs" showScore={false} />
+                    <span className="text-[11px] text-gray-400">{rev.date}</span>
+                  </div>
+                  {rev.title && <h4 className="text-xs font-bold text-gray-900 mb-1">{rev.title}</h4>}
+                  <p className="text-xs text-gray-700 leading-relaxed italic">
+                    "{rev.comment}"
+                  </p>
                 </div>
-                <p className="text-xs text-gray-700 leading-relaxed italic">
-                  "{rev.comment}"
-                </p>
+                <div className="flex items-center justify-between pt-3 border-t border-gray-100 text-xs">
+                  <span className="font-bold text-gray-900">{rev.author}</span>
+                  <Badge variant="success" size="sm" dot>Verified Owner</Badge>
+                </div>
               </div>
-              <div className="flex items-center justify-between pt-3 border-t border-gray-100 text-xs">
-                <span className="font-bold text-gray-900">{rev.author}</span>
-                <Badge variant="success" size="sm" dot>Verified Owner</Badge>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Related Products Grid */}
@@ -478,6 +502,12 @@ export const ProductDetailPage = () => {
         description={`Reviewing ${product.title}`}
       >
         <form onSubmit={handleReviewSubmit} className="space-y-4">
+          {reviewError && (
+            <AlertBanner variant="danger" onDismiss={() => setReviewError(null)}>
+              {reviewError}
+            </AlertBanner>
+          )}
+
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1">
               Your Rating (1 to 5 Stars)
@@ -501,10 +531,10 @@ export const ProductDetailPage = () => {
           </div>
 
           <Input
-            label="Your Name"
-            placeholder="e.g. Jordan Miller"
-            value={reviewName}
-            onChange={(e) => setReviewName(e.target.value)}
+            label="Review Headline"
+            placeholder="e.g. Exceptional sound and comfort"
+            value={reviewTitle}
+            onChange={(e) => setReviewTitle(e.target.value)}
             required
           />
 

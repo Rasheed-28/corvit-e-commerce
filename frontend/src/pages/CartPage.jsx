@@ -18,6 +18,7 @@ import { Input } from '../components/common/Input';
 import { EmptyState } from '../components/common/EmptyState';
 import { useCart } from '../contexts/CartContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { ordersApi } from '../api/ordersApi';
 
 export const CartPage = () => {
   const { items, totalItems, subtotal, updateQuantity, removeItem, clearCart } = useCart();
@@ -33,23 +34,35 @@ export const CartPage = () => {
   const estimatedTax = subtotal * 0.08; // 8% estimated sales tax
   const orderTotal = Math.max(0, subtotal + shippingCost + estimatedTax - appliedDiscount);
 
-  const handleApplyCoupon = (e) => {
+  const handleApplyCoupon = async (e) => {
     e.preventDefault();
     if (!couponCode.trim()) return;
 
     const code = couponCode.trim().toUpperCase();
-    if (code === 'SAVE10' || code === 'NOVA10') {
-      const discountVal = subtotal * 0.10;
-      setAppliedDiscount(discountVal);
-      setCouponSuccess(`Coupon "${code}" applied (-10% off)`);
-      notify.success(`10% discount applied to your order!`, 'Coupon Applied');
-    } else if (code === 'FREESHIP') {
-      setAppliedDiscount(shippingCost);
-      setCouponSuccess(`Free shipping unlocked!`);
-      notify.success('Free shipping coupon applied.', 'Coupon Applied');
-    } else {
-      notify.error('Invalid or expired promotional code.', 'Coupon Error');
-      setCouponSuccess(null);
+    try {
+      const res = await ordersApi.validateCoupon(code, subtotal);
+      if (res?.success && res.data) {
+        const discountVal = parseFloat(res.data.discount_amount || 0);
+        setAppliedDiscount(discountVal);
+        setCouponSuccess(`Coupon "${res.data.code}" applied (-$${discountVal.toFixed(2)})`);
+        notify.success('Coupon applied successfully!', 'Coupon Applied');
+        return;
+      }
+    } catch {
+      // Fallback local promo codes
+      if (code === 'SAVE10' || code === 'NOVA10') {
+        const discountVal = subtotal * 0.10;
+        setAppliedDiscount(discountVal);
+        setCouponSuccess(`Coupon "${code}" applied (-10% off)`);
+        notify.success(`10% discount applied to your order!`, 'Coupon Applied');
+      } else if (code === 'FREESHIP') {
+        setAppliedDiscount(shippingCost);
+        setCouponSuccess(`Free shipping unlocked!`);
+        notify.success('Free shipping coupon applied.', 'Coupon Applied');
+      } else {
+        notify.error('Invalid or expired promotional code.', 'Coupon Error');
+        setCouponSuccess(null);
+      }
     }
   };
 

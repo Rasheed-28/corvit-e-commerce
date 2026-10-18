@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ShoppingBag, Lock, Mail, ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { ShoppingBag, Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react';
 import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
 import { Checkbox } from '../components/common/Checkbox';
@@ -37,19 +37,15 @@ export const LoginPage = () => {
         notify.success('Signed in successfully! Welcome back.', 'Authentication');
         navigate(from, { replace: true });
       } else {
-        // Fallback for mock demo session
-        notify.success('Demo customer session activated.', 'Welcome');
-        navigate(from, { replace: true });
+        setErrorMessage('Authentication failed. Please verify your credentials.');
       }
     } catch (err) {
-      // In development or if backend is offline, support graceful reviewer sign-in
-      console.warn('Backend login response:', err);
-      if (usernameOrEmail && password) {
-        notify.success('Signed in successfully (Mock Storefront Demo).', 'Welcome');
-        navigate(from, { replace: true });
-      } else {
-        setErrorMessage(err.message || 'Invalid username or password.');
-      }
+      const message =
+        err.message ||
+        (err.details && typeof err.details === 'object'
+          ? Object.values(err.details).flat().join(' ')
+          : 'Invalid username or password.');
+      setErrorMessage(message);
     } finally {
       setIsLoading(false);
     }
@@ -130,10 +126,10 @@ export const LoginPage = () => {
             </Button>
           </form>
 
-          {/* Reviewer Demo Quick Fill */}
+          {/* Quick Fill Credentials for Seeded Customer */}
           <div className="p-3 bg-emerald-50/70 rounded-xl border border-emerald-200/70 text-xs text-emerald-900 flex items-center justify-between gap-2">
             <div>
-              <span className="font-bold block">Quick Demo Credentials</span>
+              <span className="font-bold block">Seeded Customer Account</span>
               <span className="text-[11px] text-emerald-700">alex.reynolds@example.com</span>
             </div>
             <button

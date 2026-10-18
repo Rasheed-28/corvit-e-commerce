@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useNotification } from './NotificationContext';
-import { MOCK_PRODUCTS } from '../data/mockProducts';
 
 const WishlistContext = createContext(null);
 
@@ -16,8 +15,7 @@ export const WishlistProvider = ({ children }) => {
     } catch {
       // Fallback
     }
-    // Default starter wishlist items for realistic showcase
-    return [MOCK_PRODUCTS[1], MOCK_PRODUCTS[3]];
+    return [];
   });
 
   const { notify } = useNotification();
@@ -96,3 +94,5 @@ export const useWishlist = () => {
   }
   return context;
 };
+
+export default WishlistContext;

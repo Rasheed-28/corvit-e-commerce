@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Lock, Mail, User, ArrowRight, ShieldCheck } from 'lucide-react';
+import { ShoppingBag, Lock, Mail, ArrowRight } from 'lucide-react';
 import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
 import { Checkbox } from '../components/common/Checkbox';
@@ -41,6 +41,11 @@ export const RegisterPage = () => {
       return;
     }
 
+    if (formData.password.length < 8) {
+      setErrorMessage('Password must be at least 8 characters long.');
+      return;
+    }
+
     if (!formData.agreeTerms) {
       setErrorMessage('Please accept the Terms of Service to create your account.');
       return;
@@ -54,15 +59,25 @@ export const RegisterPage = () => {
         first_name: formData.firstName,
         last_name: formData.lastName,
         password: formData.password,
+        password_confirm: formData.confirmPassword,
       });
 
-      notify.success('Account created successfully! Welcome to NovaStore.', 'Registration Complete');
-      navigate('/account');
+      if (res?.success) {
+        notify.success('Account created successfully! Welcome to NovaStore.', 'Registration Complete');
+        navigate('/account');
+      } else {
+        setErrorMessage('Registration could not be completed. Please review your details.');
+      }
     } catch (err) {
-      console.warn('Backend register error:', err);
-      // Demo session fallback
-      notify.success('Account registered successfully (Demo Mode).', 'Welcome');
-      navigate('/account');
+      let msg = err.message || 'Registration failed.';
+      if (err.details && typeof err.details === 'object') {
+        const detailsList = Object.entries(err.details).map(([key, val]) => {
+          const valText = Array.isArray(val) ? val.join(' ') : String(val);
+          return `${key}: ${valText}`;
+        });
+        msg = detailsList.join(' | ');
+      }
+      setErrorMessage(msg);
     } finally {
       setIsLoading(false);
     }

@@ -1,9 +1,130 @@
-import axiosClient from './axiosClient';
+import axiosClient from './axiosClient.js';
+import { API_ROUTES } from '../utils/constants.js';
+
+/**
+ * Normalizes backend Product schema into standard UI product model.
+ */
+export function normalizeProduct(p) {
+  if (!p) return null;
+
+  const price =
+    typeof p.base_price !== 'undefined'
+      ? parseFloat(p.base_price)
+      : typeof p.price !== 'undefined'
+      ? parseFloat(p.price)
+      : 0;
+
+  const originalPrice =
+    p.originalPrice !== undefined && p.originalPrice !== null
+      ? parseFloat(p.originalPrice)
+      : p.original_price
+      ? parseFloat(p.original_price)
+      : null;
+
+  // Format gallery images
+  let images = [];
+  if (Array.isArray(p.images) && p.images.length > 0) {
+    images = p.images.map((img) =>
+      typeof img === 'string' ? img : img?.image || ''
+    ).filter(Boolean);
+  }
+  if (images.length === 0 && p.primary_image) {
+    images = [p.primary_image];
+  }
+  if (images.length === 0) {
+    images = ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'];
+  }
+
+  // Calculate stock levels
+  const stock =
+    typeof p.available_quantity !== 'undefined'
+      ? p.available_quantity
+      : typeof p.total_stock !== 'undefined'
+      ? p.total_stock
+      : p.stock ?? 0;
+
+  const categoryName =
+    p.category_name ||
+    (typeof p.category === 'object' ? p.category?.name : p.category) ||
+    'Storefront';
+
+  const categorySlug =
+    p.category_slug ||
+    (typeof p.category === 'object' ? p.category?.slug : p.categorySlug) ||
+    '';
+
+  const rating =
+    p.rating_summary?.average_rating ??
+    (typeof p.rating === 'number' ? p.rating : 4.8);
+
+  const reviewCount =
+    p.rating_summary?.review_count ??
+    p.reviewCount ??
+    (Array.isArray(p.reviews) ? p.reviews.length : 0);
+
+  // Normalize variants & colors
+  const colors =
+    p.colors ||
+    (Array.isArray(p.variants)
+      ? [
+          ...new Map(
+            p.variants
+              .filter((v) => v.color)
+              .map((v) => [v.color, { name: v.color, hex: '#334155' }])
+          ).values(),
+        ]
+      : []);
+
+  return {
+    ...p,
+    id: p.id,
+    title: p.title,
+    slug: p.slug,
+    sku: p.sku || '',
+    description: p.description || '',
+    price,
+    base_price: p.base_price || price,
+    originalPrice,
+    images,
+    primary_image: images[0] || p.primary_image,
+    stock,
+    is_in_stock: p.is_in_stock ?? stock > 0,
+    category: categoryName,
+    categoryName,
+    categorySlug,
+    rating,
+    reviewCount,
+    colors,
+    isNew: Boolean(p.isNew ?? p.is_new ?? false),
+    isBestseller: Boolean(p.is_featured ?? p.isBestseller ?? false),
+    is_featured: Boolean(p.is_featured),
+    variants: p.variants || [],
+    reviews: p.reviews || [],
+  };
+}
+
+/**
+ * Normalizes category models
+ */
+export function normalizeCategory(c) {
+  if (!c) return null;
+  return {
+    id: c.id,
+    name: c.name,
+    slug: c.slug,
+    description: c.description || '',
+    image:
+      c.image ||
+      'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80',
+    itemCount: c.product_count ?? c.itemCount ?? 0,
+    parent: c.parent,
+    children: c.children || [],
+  };
+}
 
 /**
  * Catalog API Service Module
- * Handles category retrieval, product search, multi-faceted filtering,
- * pagination, product details with variants & reviews, and administrative catalogue management.
+ * Connects directly to Django REST Framework `/api/v1/catalog/` endpoints.
  */
 export const catalogApi = {
   // =========================================================================
@@ -15,7 +136,14 @@ export const catalogApi = {
    * @param {Object} [params] - Query options (e.g. { flat: true })
    */
   async getCategories(params = {}) {
-    return axiosClient.get('/categories/', { params });
+    const res = await axiosClient.get(API_ROUTES.CATALOG.CATEGORIES, { params });
+    if (res?.data && Array.isArray(res.data)) {
+      return {
+        ...res,
+        data: res.data.map(normalizeCategory),
+      };
+    }
+    return res;
   },
 
   /**
@@ -23,26 +151,85 @@ export const catalogApi = {
    * @param {string} slugOrId - Category slug or UUID
    */
   async getCategory(slugOrId) {
-    return axiosClient.get(`/categories/${slugOrId}/`);
+    const res = await axiosClient.get(`${API_ROUTES.CATALOG.CATEGORIES}${slugOrId}/`);
+    if (res?.data) {
+      return {
+        ...res,
+        data: normalizeCategory(res.data),
+      };
+    }
+    return res;
   },
 
   /**
    * Retrieves paginated products with filtering, search, and sorting
-   * @param {Object} [params] - Search, filter, sort and pagination parameters:
-   *   search: string (product name, description, SKU)
-   *   category: string (category slug or UUID)
-   *   min_price: number (e.g. 50.00)
-   *   max_price: number (e.g. 500.00)
-   *   in_stock: boolean ('true' / 'false')
-   *   is_featured: boolean ('true' / 'false')
-   *   color: string (e.g. 'Space Gray')
-   *   size: string (e.g. '15-inch')
-   *   sort: 'price_asc' | 'price_desc' | 'newest' | 'oldest' | 'title_asc' | 'title_desc'
-   *   page: number
-   *   page_size: number
+   * @param {Object} [params] - Search, filter, sort and pagination parameters
    */
   async getProducts(params = {}) {
-    return axiosClient.get('/products/', { params });
+    const queryParams = {};
+
+    // Category
+    if (params.category && params.category !== 'all') {
+      queryParams.category = params.category;
+    }
+
+    // Search query
+    if (params.search && params.search.trim()) {
+      queryParams.search = params.search.trim();
+    }
+
+    // Price Bounds
+    if (params.min_price !== undefined && params.min_price !== '') {
+      queryParams.min_price = params.min_price;
+    }
+    if (params.max_price !== undefined && params.max_price !== '') {
+      queryParams.max_price = params.max_price;
+    }
+
+    // In Stock
+    if (params.in_stock === true || params.in_stock === 'true') {
+      queryParams.in_stock = 'true';
+    }
+
+    // Sorting mapping
+    if (params.sort) {
+      const sortMap = {
+        'price-low': 'price_asc',
+        price_asc: 'price_asc',
+        'price-high': 'price_desc',
+        price_desc: 'price_desc',
+        newest: 'newest',
+        oldest: 'oldest',
+        'title-asc': 'title_asc',
+        title_asc: 'title_asc',
+        'title-desc': 'title_desc',
+        title_desc: 'title_desc',
+      };
+      if (sortMap[params.sort]) {
+        queryParams.sort = sortMap[params.sort];
+      }
+    }
+
+    // Pagination
+    if (params.page) {
+      queryParams.page = params.page;
+    }
+    if (params.page_size) {
+      queryParams.page_size = params.page_size;
+    }
+
+    const res = await axiosClient.get(API_ROUTES.CATALOG.PRODUCTS, {
+      params: queryParams,
+    });
+
+    if (res?.data && Array.isArray(res.data)) {
+      return {
+        ...res,
+        data: res.data.map(normalizeProduct),
+      };
+    }
+
+    return res;
   },
 
   /**
@@ -50,7 +237,36 @@ export const catalogApi = {
    * @param {string} slugOrId - Product slug or canonical UUID
    */
   async getProduct(slugOrId) {
-    return axiosClient.get(`/products/${slugOrId}/`);
+    const res = await axiosClient.get(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/`);
+    if (res?.data) {
+      return {
+        ...res,
+        data: normalizeProduct(res.data),
+      };
+    }
+    return res;
+  },
+
+  /**
+   * Retrieves related products for a product
+   */
+  async getRelatedProducts(currentSlug, categorySlug, limit = 4) {
+    try {
+      const res = await this.getProducts({
+        category: categorySlug,
+        page_size: limit + 2,
+      });
+      if (res?.data) {
+        const filtered = res.data.filter((p) => p.slug !== currentSlug).slice(0, limit);
+        return {
+          success: true,
+          data: filtered,
+        };
+      }
+      return { success: true, data: [] };
+    } catch {
+      return { success: true, data: [] };
+    }
   },
 
   /**
@@ -58,7 +274,7 @@ export const catalogApi = {
    * @param {string} slugOrId - Product slug or UUID
    */
   async getProductVariants(slugOrId) {
-    return axiosClient.get(`/products/${slugOrId}/variants/`);
+    return axiosClient.get(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/variants/`);
   },
 
   /**
@@ -67,7 +283,9 @@ export const catalogApi = {
    * @param {Object} [params] - Pagination options
    */
   async getProductReviews(slugOrId, params = {}) {
-    return axiosClient.get(`/products/${slugOrId}/reviews/`, { params });
+    return axiosClient.get(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/reviews/`, {
+      params,
+    });
   },
 
   /**
@@ -76,124 +294,87 @@ export const catalogApi = {
    * @param {Object} reviewData - { rating: 1-5, title: string, comment: string }
    */
   async addProductReview(slugOrId, reviewData) {
-    return axiosClient.post(`/products/${slugOrId}/reviews/`, reviewData);
+    return axiosClient.post(
+      `${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/reviews/`,
+      reviewData
+    );
+  },
+
+  /**
+   * Alias for addProductReview
+   */
+  async addReview(slugOrId, reviewData) {
+    return this.addProductReview(slugOrId, reviewData);
   },
 
   // =========================================================================
   // Administrative Catalog Endpoints (Staff Only)
   // =========================================================================
 
-  /**
-   * Creates a new product with optional initial variants & stock
-   * @param {Object} productData
-   */
   async createProduct(productData) {
-    return axiosClient.post('/products/', productData);
+    return axiosClient.post(API_ROUTES.CATALOG.PRODUCTS, productData);
   },
 
-  /**
-   * Updates an existing product
-   * @param {string} slugOrId - Product slug or UUID
-   * @param {Object} productData
-   */
   async updateProduct(slugOrId, productData) {
-    return axiosClient.patch(`/products/${slugOrId}/`, productData);
+    return axiosClient.patch(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/`, productData);
   },
 
-  /**
-   * Deletes a product
-   * @param {string} slugOrId - Product slug or UUID
-   */
   async deleteProduct(slugOrId) {
-    return axiosClient.delete(`/products/${slugOrId}/`);
+    return axiosClient.delete(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/`);
   },
 
-  /**
-   * Publishes an unpublished product making it visible to customers
-   * @param {string} slugOrId - Product slug or UUID
-   */
   async publishProduct(slugOrId) {
-    return axiosClient.post(`/products/${slugOrId}/publish/`);
+    return axiosClient.post(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/publish/`);
   },
 
-  /**
-   * Unpublishes a product hiding it from public customer listings
-   * @param {string} slugOrId - Product slug or UUID
-   */
   async unpublishProduct(slugOrId) {
-    return axiosClient.post(`/products/${slugOrId}/unpublish/`);
+    return axiosClient.post(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/unpublish/`);
   },
 
-  /**
-   * Creates a new variant for a product
-   * @param {string} slugOrId - Product slug or UUID
-   * @param {Object} variantData - { name, sku, price_override, quantity, low_stock_threshold, color, size, attributes }
-   */
   async createVariant(slugOrId, variantData) {
-    return axiosClient.post(`/products/${slugOrId}/variants/`, variantData);
+    return axiosClient.post(
+      `${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/variants/`,
+      variantData
+    );
   },
 
-  /**
-   * Updates an existing variant's stock or attributes
-   * @param {string} variantId - Variant UUID
-   * @param {Object} variantData
-   */
   async updateVariant(variantId, variantData) {
-    return axiosClient.patch(`/variants/${variantId}/`, variantData);
+    return axiosClient.patch(`${API_ROUTES.CATALOG.VARIANTS}${variantId}/`, variantData);
   },
 
-  /**
-   * Deletes a variant
-   * @param {string} variantId - Variant UUID
-   */
   async deleteVariant(variantId) {
-    return axiosClient.delete(`/variants/${variantId}/`);
+    return axiosClient.delete(`${API_ROUTES.CATALOG.VARIANTS}${variantId}/`);
   },
 
-  /**
-   * Uploads an image to the product gallery
-   * @param {string} slugOrId - Product slug or UUID
-   * @param {FormData} formData - Form containing 'image', 'alt_text', 'is_primary'
-   */
   async uploadProductImage(slugOrId, formData) {
-    return axiosClient.post(`/products/${slugOrId}/images/`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    return axiosClient.post(
+      `${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/images/`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
   },
 
-  /**
-   * Deletes an image from the product gallery
-   * @param {string} imageId - Image UUID
-   */
   async deleteProductImage(imageId) {
-    return axiosClient.delete(`/images/${imageId}/`);
+    return axiosClient.delete(`${API_ROUTES.CATALOG.IMAGES}${imageId}/`);
   },
 
-  /**
-   * Creates a new product category
-   * @param {Object} categoryData - { name, slug, description, parent, is_active }
-   */
   async createCategory(categoryData) {
-    return axiosClient.post('/categories/', categoryData);
+    return axiosClient.post(API_ROUTES.CATALOG.CATEGORIES, categoryData);
   },
 
-  /**
-   * Updates an existing product category
-   * @param {string} slugOrId - Category slug or UUID
-   * @param {Object} categoryData
-   */
   async updateCategory(slugOrId, categoryData) {
-    return axiosClient.patch(`/categories/${slugOrId}/`, categoryData);
+    return axiosClient.patch(
+      `${API_ROUTES.CATALOG.CATEGORIES}${slugOrId}/`,
+      categoryData
+    );
   },
 
-  /**
-   * Deletes a category
-   * @param {string} slugOrId - Category slug or UUID
-   */
   async deleteCategory(slugOrId) {
-    return axiosClient.delete(`/categories/${slugOrId}/`);
+    return axiosClient.delete(`${API_ROUTES.CATALOG.CATEGORIES}${slugOrId}/`);
   },
 };
 

@@ -16,28 +16,30 @@ import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
+import { AlertBanner } from '../components/common/AlertBanner';
 import { useAuth } from '../hooks/useAuth';
 import { useNotification } from '../contexts/NotificationContext';
-import { mockAccountApi } from '../api/mockAdapter';
+import authApi from '../api/authApi';
 
 export const CustomerProfilePage = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile, changePassword, refreshUser } = useAuth();
   const { notify } = useNotification();
   const navigate = useNavigate();
 
   const [profile, setProfile] = useState({
-    firstName: 'Alex',
-    lastName: 'Reynolds',
-    email: 'alex.reynolds@example.com',
-    phone: '+1 (555) 234-5678',
-    memberSince: 'March 2024',
-    orderCount: 12,
-    rewardPoints: 480,
+    firstName: user?.first_name || '',
+    lastName: user?.last_name || '',
+    email: user?.email || '',
+    phone: user?.profile?.phone_number || '',
+    memberSince: '2026',
+    orderCount: 0,
+    rewardPoints: 100,
   });
 
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({ ...profile });
   const [isSaving, setIsSaving] = useState(false);
+  const [profileError, setProfileError] = useState(null);
 
   // Password state
   const [passwordData, setPasswordData] = useState({
@@ -46,51 +48,94 @@ export const CustomerProfilePage = () => {
     confirmNewPassword: '',
   });
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState(null);
 
+  // Load latest user profile from API
   useEffect(() => {
-    mockAccountApi.getProfile().then((res) => {
-      if (res?.success) {
-        setProfile(res.data);
-        setFormData(res.data);
-      }
-    });
+    authApi
+      .getCurrentUser()
+      .then((res) => {
+        if (res?.success && res.data) {
+          const u = res.data;
+          const updated = {
+            firstName: u.first_name || '',
+            lastName: u.last_name || '',
+            email: u.email || '',
+            phone: u.profile?.phone_number || '',
+            memberSince: '2026',
+            orderCount: 0,
+            rewardPoints: 100,
+          };
+          setProfile(updated);
+          setFormData(updated);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load profile from backend:', err);
+      });
   }, []);
 
-  const handleProfileSave = (e) => {
+  const handleProfileSave = async (e) => {
     e.preventDefault();
     setIsSaving(true);
-    mockAccountApi.updateProfile({
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      phone: formData.phone,
-    })
-      .then((res) => {
-        setProfile(res.data);
+    setProfileError(null);
+
+    try {
+      const res = await updateProfile({
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone,
+      });
+
+      if (res?.success) {
+        setProfile({
+          ...profile,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone,
+        });
         setIsEditing(false);
         notify.success('Profile details updated successfully.', 'Profile Saved');
-      })
-      .finally(() => {
-        setIsSaving(false);
-      });
+      }
+    } catch (err) {
+      const msg = err.message || 'Failed to update profile.';
+      setProfileError(msg);
+      notify.error(msg, 'Update Error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handlePasswordChange = (e) => {
+  const handlePasswordChange = async (e) => {
     e.preventDefault();
+    setPasswordError(null);
+
     if (passwordData.newPassword !== passwordData.confirmNewPassword) {
-      notify.error('New passwords do not match.', 'Password Error');
+      setPasswordError('New passwords do not match.');
       return;
     }
     if (passwordData.newPassword.length < 8) {
-      notify.error('Password must be at least 8 characters.', 'Password Error');
+      setPasswordError('Password must be at least 8 characters long.');
       return;
     }
 
     setIsUpdatingPassword(true);
-    setTimeout(() => {
-      setIsUpdatingPassword(false);
+    try {
+      await changePassword({
+        old_password: passwordData.currentPassword,
+        new_password: passwordData.newPassword,
+        new_password_confirm: passwordData.confirmNewPassword,
+      });
+
       setPasswordData({ currentPassword: '', newPassword: '', confirmNewPassword: '' });
       notify.success('Password changed successfully.', 'Security Updated');
-    }, 400);
+    } catch (err) {
+      const msg = err.message || 'Failed to change password. Please check your current password.';
+      setPasswordError(msg);
+      notify.error(msg, 'Password Change Failed');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -181,7 +226,7 @@ export const CustomerProfilePage = () => {
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
             Protected
           </p>
-          <span className="text-xs text-gray-500 mt-2 block">Two-factor auth enabled</span>
+          <span className="text-xs text-gray-500 mt-2 block">Enterprise JWT Token Guard</span>
         </div>
       </div>
 
@@ -194,11 +239,21 @@ export const CustomerProfilePage = () => {
             <Button
               variant={isEditing ? 'ghost' : 'outline'}
               size="sm"
-              onClick={() => setIsEditing(!isEditing)}
+              onClick={() => {
+                setIsEditing(!isEditing);
+                setFormData({ ...profile });
+                setProfileError(null);
+              }}
             >
               {isEditing ? 'Cancel' : 'Edit Info'}
             </Button>
           </div>
+
+          {profileError && (
+            <AlertBanner variant="danger" onDismiss={() => setProfileError(null)}>
+              {profileError}
+            </AlertBanner>
+          )}
 
           {isEditing ? (
             <form onSubmit={handleProfileSave} className="space-y-4">
@@ -241,11 +296,11 @@ export const CustomerProfilePage = () => {
               </div>
               <div className="flex justify-between py-2">
                 <span className="text-gray-500">Phone Number</span>
-                <span className="font-semibold text-gray-900">{profile.phone}</span>
+                <span className="font-semibold text-gray-900">{profile.phone || 'Not provided'}</span>
               </div>
               <div className="flex justify-between py-2">
                 <span className="text-gray-500">Account Type</span>
-                <span className="font-semibold text-gray-900">Retail Verified Customer</span>
+                <span className="font-semibold text-gray-900">Verified Customer Account</span>
               </div>
             </div>
           )}
@@ -257,6 +312,12 @@ export const CustomerProfilePage = () => {
             <Lock className="w-5 h-5 text-gray-500" />
             <span>Security & Password</span>
           </h3>
+
+          {passwordError && (
+            <AlertBanner variant="danger" onDismiss={() => setPasswordError(null)}>
+              {passwordError}
+            </AlertBanner>
+          )}
 
           <form onSubmit={handlePasswordChange} className="space-y-4">
             <Input

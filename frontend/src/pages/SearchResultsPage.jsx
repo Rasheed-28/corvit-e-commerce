@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { Search, Sparkles, SlidersHorizontal, ArrowRight } from 'lucide-react';
+import { Search, Sparkles } from 'lucide-react';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { SearchInput } from '../components/common/SearchInput';
 import { ProductGrid } from '../components/product/ProductGrid';
@@ -8,7 +8,8 @@ import { QuickViewModal } from '../components/product/QuickViewModal';
 import { Select } from '../components/common/Select';
 import { Button } from '../components/common/Button';
 import { EmptyState } from '../components/common/EmptyState';
-import { mockCatalogApi } from '../api/mockAdapter';
+import { AlertBanner } from '../components/common/AlertBanner';
+import { catalogApi } from '../api/catalogApi';
 
 export const SearchResultsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -18,6 +19,7 @@ export const SearchResultsPage = () => {
   const [inputVal, setInputVal] = useState(query);
   const [products, setProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState(null);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
 
   useEffect(() => {
@@ -26,18 +28,23 @@ export const SearchResultsPage = () => {
 
   useEffect(() => {
     setIsLoading(true);
-    mockCatalogApi.getProducts({
-      search: query,
-      sort: sortBy,
-      page_size: 24,
-    })
+    setErrorMessage(null);
+    catalogApi
+      .getProducts({
+        search: query,
+        sort: sortBy,
+        page_size: 24,
+      })
       .then((res) => {
-        if (res?.success) {
+        if (res?.success && Array.isArray(res.data)) {
           setProducts(res.data);
+        } else {
+          setProducts([]);
         }
       })
       .catch((err) => {
-        console.error(err);
+        console.error('Failed to search products:', err);
+        setErrorMessage(err.message || 'Error occurred while querying search catalog.');
         setProducts([]);
       })
       .finally(() => {
@@ -111,7 +118,6 @@ export const SearchResultsPage = () => {
                 { value: 'featured', label: 'Sort: Relevant' },
                 { value: 'price-low', label: 'Price: Low to High' },
                 { value: 'price-high', label: 'Price: High to Low' },
-                { value: 'rating', label: 'Highest Rated' },
                 { value: 'newest', label: 'Newest Releases' },
               ]}
             />
@@ -136,6 +142,12 @@ export const SearchResultsPage = () => {
           ))}
         </div>
       </div>
+
+      {errorMessage && (
+        <AlertBanner variant="danger" onDismiss={() => setErrorMessage(null)}>
+          {errorMessage}
+        </AlertBanner>
+      )}
 
       {/* Results Grid */}
       <ProductGrid

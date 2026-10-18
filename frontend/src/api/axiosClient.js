@@ -3,9 +3,9 @@ import axios from 'axios';
 /**
  * Helper to retrieve cookie by name from document.cookie
  */
-function getCookie(name) {
+export function getCookie(name) {
   let cookieValue = null;
-  if (document.cookie && document.cookie !== '') {
+  if (typeof document !== 'undefined' && document.cookie && document.cookie !== '') {
     const cookies = document.cookie.split(';');
     for (let i = 0; i < cookies.length; i++) {
       const cookie = cookies[i].trim();
@@ -18,9 +18,32 @@ function getCookie(name) {
   return cookieValue;
 }
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+// In-memory token storage for CSRF and JWT Authorization header support
+let inMemoryCsrfToken = null;
+let inMemoryAccessToken = null;
 
-const axiosClient = axios.create({
+export function setCsrfToken(token) {
+  inMemoryCsrfToken = token;
+}
+
+export function getCsrfToken() {
+  return getCookie('csrftoken') || inMemoryCsrfToken;
+}
+
+export function setAccessToken(token) {
+  inMemoryAccessToken = token;
+}
+
+export function getAccessToken() {
+  return inMemoryAccessToken;
+}
+
+export const baseURL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ||
+  (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL) ||
+  '/api/v1';
+
+export const axiosClient = axios.create({
   baseURL,
   withCredentials: true, // Send HttpOnly auth & csrf cookies automatically
   headers: {
@@ -30,12 +53,18 @@ const axiosClient = axios.create({
   timeout: 15000,
 });
 
-// Request Interceptor: Attach CSRF token on mutating methods
+// Request Interceptor: Attach Bearer authorization & CSRF token on mutating HTTP methods
 axiosClient.interceptors.request.use(
   (config) => {
+    // Attach Bearer token if active
+    const accessToken = getAccessToken();
+    if (accessToken && !config.headers['Authorization']) {
+      config.headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+
     const method = config.method?.toUpperCase();
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-      const csrfToken = getCookie('csrftoken');
+      const csrfToken = getCsrfToken();
       if (csrfToken) {
         config.headers['X-CSRFToken'] = csrfToken;
       }
@@ -47,35 +76,93 @@ axiosClient.interceptors.request.use(
 
 // Response Interceptor: Automatic token refresh on 401 & standardized error envelopes
 axiosClient.interceptors.response.use(
-  (response) => response.data,
+  (response) => {
+    // If response payload contains a CSRF token, cache it for fallback
+    if (response?.data?.data?.csrfToken) {
+      setCsrfToken(response.data.data.csrfToken);
+    }
+    // If response payload returns JWT tokens, cache access token
+    if (response?.data?.data?.tokens?.access) {
+      setAccessToken(response.data.data.tokens.access);
+    }
+    return response.data;
+  },
   async (error) => {
     const originalRequest = error.config;
 
-    // Skip retry on login, register, csrf, or refresh attempts
+    // Skip retry on login, register, csrf, or refresh attempts to prevent loops
     const isAuthRoute =
       originalRequest?.url?.includes('/auth/login/') ||
       originalRequest?.url?.includes('/auth/register/') ||
       originalRequest?.url?.includes('/auth/token/refresh/') ||
       originalRequest?.url?.includes('/auth/csrf/');
 
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRoute) {
+    if (error.response?.status === 401 && !originalRequest?._retry && !isAuthRoute) {
       originalRequest._retry = true;
       try {
-        // Attempt silent token refresh via HttpOnly cookie
-        await axios.post(`${baseURL}/auth/token/refresh/`, {}, { withCredentials: true });
+        // Attempt silent token refresh via HttpOnly cookie or Authorization
+        const refreshHeaders = {};
+        const csrfToken = getCsrfToken();
+        if (csrfToken) refreshHeaders['X-CSRFToken'] = csrfToken;
+
+        const refreshRes = await axios.post(
+          `${baseURL}/auth/token/refresh/`,
+          {},
+          { withCredentials: true, headers: refreshHeaders }
+        );
+
+        if (refreshRes?.data?.data?.tokens?.access) {
+          setAccessToken(refreshRes.data.data.tokens.access);
+        }
+
         return axiosClient(originalRequest);
       } catch (refreshError) {
-        // Refresh failed (token expired or blacklisted)
-        // Bubble up error so AuthContext can handle logout
+        setAccessToken(null);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('auth:expired', {
+              detail: { message: 'Your session has expired. Please sign in again.' },
+            })
+          );
+        }
+      }
+    }
+
+    // Emit event for forbidden / permission errors
+    if (error.response?.status === 403) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('auth:forbidden', {
+            detail: {
+              message:
+                error.response?.data?.error?.message ||
+                error.response?.data?.detail ||
+                'You do not have permission to perform this action.',
+            },
+          })
+        );
       }
     }
 
     const normalizedError = {
-      message: error.response?.data?.error?.message || error.message || 'An unexpected error occurred.',
-      code: error.response?.data?.error?.code || 'UNKNOWN_ERROR',
+      message:
+        error.response?.data?.error?.message ||
+        (typeof error.response?.data?.detail === 'string' ? error.response.data.detail : null) ||
+        error.message ||
+        'An unexpected error occurred.',
+      code:
+        error.response?.data?.error?.code ||
+        (error.response?.status === 403
+          ? 'FORBIDDEN'
+          : error.response?.status === 401
+          ? 'UNAUTHORIZED'
+          : error.response?.status === 404
+          ? 'NOT_FOUND'
+          : 'UNKNOWN_ERROR'),
       status: error.response?.status,
-      details: error.response?.data?.error?.details || null,
+      details: error.response?.data?.error?.details || error.response?.data || null,
     };
+
     return Promise.reject(normalizedError);
   }
 );

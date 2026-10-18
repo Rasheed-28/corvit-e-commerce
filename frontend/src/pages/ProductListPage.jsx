@@ -11,7 +11,8 @@ import { Input } from '../components/common/Input';
 import { Badge } from '../components/common/Badge';
 import { Drawer } from '../components/common/Drawer';
 import { Pagination } from '../components/common/Pagination';
-import { mockCatalogApi } from '../api/mockAdapter';
+import { AlertBanner } from '../components/common/AlertBanner';
+import { catalogApi } from '../api/catalogApi';
 
 export const ProductListPage = () => {
   const { slug } = useParams(); // For /categories/:slug
@@ -22,6 +23,7 @@ export const ProductListPage = () => {
   const [categories, setCategories] = useState([]);
   const [currentCategory, setCurrentCategory] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, total_pages: 1, total_count: 0 });
   const [quickViewProduct, setQuickViewProduct] = useState(null);
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
@@ -36,15 +38,17 @@ export const ProductListPage = () => {
 
   // Load Categories once
   useEffect(() => {
-    mockCatalogApi.getCategories().then((res) => {
-      if (res?.success) setCategories(res.data);
+    catalogApi.getCategories().then((res) => {
+      if (res?.success && Array.isArray(res.data)) {
+        setCategories(res.data);
+      }
     });
   }, []);
 
   // Sync current category info
   useEffect(() => {
     if (slug) {
-      mockCatalogApi.getCategory(slug)
+      catalogApi.getCategory(slug)
         .then((res) => {
           if (res?.success) setCurrentCategory(res.data);
         })
@@ -54,10 +58,11 @@ export const ProductListPage = () => {
     }
   }, [slug]);
 
-  // Fetch Products based on current filters and page
+  // Fetch Products based on current filters and page from Django REST API
   useEffect(() => {
     setIsLoading(true);
-    mockCatalogApi.getProducts({
+    setErrorMessage(null);
+    catalogApi.getProducts({
       category: selectedCategory,
       min_price: minPrice,
       max_price: maxPrice,
@@ -68,12 +73,17 @@ export const ProductListPage = () => {
     })
       .then((res) => {
         if (res?.success) {
-          setProducts(res.data);
-          setPagination(res.meta.pagination);
+          setProducts(res.data || []);
+          if (res.meta?.pagination) {
+            setPagination(res.meta.pagination);
+          }
+        } else {
+          setProducts([]);
         }
       })
       .catch((err) => {
         console.error('Failed to load products:', err);
+        setErrorMessage(err.message || 'Failed to load products from server.');
         setProducts([]);
       })
       .finally(() => {
@@ -98,7 +108,7 @@ export const ProductListPage = () => {
   };
 
   const clearAllFilters = () => {
-    setSearchParams(slug ? {} : {});
+    setSearchParams({});
   };
 
   const activeFilterCount = useMemo(() => {
@@ -171,85 +181,75 @@ export const ProductListPage = () => {
                 { value: 'newest', label: 'Newest Arrivals' },
                 { value: 'price-low', label: 'Price: Low to High' },
                 { value: 'price-high', label: 'Price: High to Low' },
-                { value: 'rating', label: 'Highest Rated' },
               ]}
             />
           </div>
         </div>
       </div>
 
-      {/* Main Grid & Sidebar Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      {errorMessage && (
+        <AlertBanner variant="danger" onDismiss={() => setErrorMessage(null)}>
+          {errorMessage}
+        </AlertBanner>
+      )}
+
+      {/* Main Layout Grid (Desktop Sidebar + Product Grid) */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
         {/* Desktop Filter Sidebar */}
-        <aside className="hidden lg:block space-y-6">
-          <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-            <h3 className="font-bold text-gray-900 text-base flex items-center gap-2">
-              <SlidersHorizontal className="w-4 h-4 text-emerald-600" />
+        <aside className="hidden lg:block lg:col-span-1 bg-white p-6 rounded-3xl border border-gray-200/90 shadow-xs space-y-6 sticky top-24">
+          <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+            <div className="flex items-center gap-2 font-bold text-gray-900 text-sm">
+              <Filter className="w-4 h-4 text-emerald-600" />
               <span>Filters</span>
-            </h3>
+            </div>
             {activeFilterCount > 0 && (
               <button
                 type="button"
                 onClick={clearAllFilters}
-                className="text-xs text-emerald-600 hover:text-emerald-800 font-semibold"
+                className="text-xs text-emerald-600 hover:text-emerald-700 font-semibold"
               >
-                Clear All
+                Reset All ({activeFilterCount})
               </button>
             )}
           </div>
 
-          {/* Categories */}
+          {/* Department Categories List */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
               Department
-            </h4>
+            </span>
             <div className="space-y-1">
               <Link
                 to="/products"
                 className={`block px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
-                  !slug && selectedCategory === 'all'
-                    ? 'bg-emerald-50 text-emerald-800'
-                    : 'text-gray-700 hover:bg-gray-100'
+                  selectedCategory === 'all'
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'text-gray-600 hover:bg-gray-50'
                 }`}
               >
                 All Departments
               </Link>
-              {categories.map((c) => (
+              {categories.map((cat) => (
                 <Link
-                  key={c.id}
-                  to={`/categories/${c.slug}`}
-                  className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
-                    slug === c.slug
-                      ? 'bg-emerald-50 text-emerald-800'
-                      : 'text-gray-700 hover:bg-gray-100'
+                  key={cat.id}
+                  to={`/categories/${cat.slug}`}
+                  className={`block px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                    selectedCategory === cat.slug
+                      ? 'bg-emerald-50 text-emerald-700 font-bold'
+                      : 'text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  <span>{c.name}</span>
-                  <span className="text-gray-400 font-normal">{c.itemCount}</span>
+                  {cat.name}
                 </Link>
               ))}
             </div>
           </div>
 
-          {/* Availability */}
-          <div className="pt-4 border-t border-gray-100 space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
-              Availability
-            </h4>
-            <Checkbox
-              id="instock-checkbox"
-              label="In Stock Only"
-              description="Hide out of stock items"
-              checked={inStockOnly}
-              onChange={(e) => updateFilters({ in_stock: e.target.checked ? 'true' : '' })}
-            />
-          </div>
-
-          {/* Price Filter */}
-          <div className="pt-4 border-t border-gray-100 space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+          {/* Price Range Filter */}
+          <div className="space-y-3 pt-4 border-t border-gray-100">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
               Price Range ($)
-            </h4>
+            </span>
             <div className="grid grid-cols-2 gap-2">
               <Input
                 type="number"
@@ -267,10 +267,23 @@ export const ProductListPage = () => {
               />
             </div>
           </div>
+
+          {/* Availability Checkbox */}
+          <div className="space-y-3 pt-4 border-t border-gray-100">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
+              Availability
+            </span>
+            <Checkbox
+              id="instock-filter"
+              label="In Stock Only"
+              checked={inStockOnly}
+              onChange={(e) => updateFilters({ in_stock: e.target.checked ? 'true' : null })}
+            />
+          </div>
         </aside>
 
-        {/* Product Grid Area */}
-        <div className="lg:col-span-3 space-y-8">
+        {/* Product Grid & Pagination Area */}
+        <main className="lg:col-span-3 space-y-8">
           <ProductGrid
             products={products}
             isLoading={isLoading}
@@ -278,24 +291,96 @@ export const ProductListPage = () => {
             onQuickView={(p) => setQuickViewProduct(p)}
           />
 
-          {/* Pagination */}
-          <Pagination
-            currentPage={pagination.page}
-            totalPages={pagination.total_pages}
-            onPageChange={(p) => updateFilters({ page: p })}
-          />
-        </div>
+          {/* Pagination Controls */}
+          {!isLoading && pagination.total_pages > 1 && (
+            <div className="pt-6 border-t border-gray-200">
+              <Pagination
+                currentPage={pagination.page}
+                totalPages={pagination.total_pages}
+                onPageChange={(newPage) => updateFilters({ page: newPage.toString() })}
+              />
+            </div>
+          )}
+        </main>
       </div>
 
-      {/* Mobile Filter Drawer */}
+      {/* Mobile Filters Drawer */}
       <Drawer
         isOpen={isMobileFilterOpen}
         onClose={() => setIsMobileFilterOpen(false)}
-        title="Filter Catalog"
-        placement="left"
-        size="sm"
-        footer={
-          <div className="flex gap-2">
+        title="Filter Products"
+        position="right"
+      >
+        <div className="space-y-6 p-4">
+          <div className="space-y-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
+              Department
+            </span>
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  updateFilters({ category: null });
+                  setIsMobileFilterOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold ${
+                  selectedCategory === 'all'
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'text-gray-700'
+                }`}
+              >
+                All Departments
+              </button>
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => {
+                    updateFilters({ category: cat.slug });
+                    setIsMobileFilterOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold ${
+                    selectedCategory === cat.slug
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'text-gray-700'
+                  }`}
+                >
+                  {cat.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-4 border-t border-gray-100">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
+              Price Bounds ($)
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="number"
+                placeholder="Min"
+                value={minPrice}
+                onChange={(e) => updateFilters({ min_price: e.target.value })}
+              />
+              <Input
+                type="number"
+                placeholder="Max"
+                value={maxPrice}
+                onChange={(e) => updateFilters({ max_price: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-gray-100">
+            <Checkbox
+              id="mobile-instock"
+              label="In Stock Only"
+              checked={inStockOnly}
+              onChange={(e) => updateFilters({ in_stock: e.target.checked ? 'true' : null })}
+            />
+          </div>
+
+          <div className="pt-6 flex gap-3">
             <Button
               variant="outline"
               size="md"
@@ -315,66 +400,6 @@ export const ProductListPage = () => {
             >
               Apply Filters
             </Button>
-          </div>
-        }
-      >
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
-              Departments
-            </h4>
-            <div className="space-y-1">
-              <Link
-                to="/products"
-                onClick={() => setIsMobileFilterOpen(false)}
-                className={`block p-2 rounded-lg text-xs font-semibold ${
-                  !slug ? 'bg-emerald-50 text-emerald-800' : 'text-gray-700'
-                }`}
-              >
-                All Departments
-              </Link>
-              {categories.map((c) => (
-                <Link
-                  key={c.id}
-                  to={`/categories/${c.slug}`}
-                  onClick={() => setIsMobileFilterOpen(false)}
-                  className={`block p-2 rounded-lg text-xs font-semibold ${
-                    slug === c.slug ? 'bg-emerald-50 text-emerald-800' : 'text-gray-700'
-                  }`}
-                >
-                  {c.name}
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-gray-100">
-            <Checkbox
-              id="instock-checkbox-mobile"
-              label="In Stock Only"
-              checked={inStockOnly}
-              onChange={(e) => updateFilters({ in_stock: e.target.checked ? 'true' : '' })}
-            />
-          </div>
-
-          <div className="pt-4 border-t border-gray-100 space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
-              Price Range ($)
-            </h4>
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                type="number"
-                placeholder="Min"
-                value={minPrice}
-                onChange={(e) => updateFilters({ min_price: e.target.value })}
-              />
-              <Input
-                type="number"
-                placeholder="Max"
-                value={maxPrice}
-                onChange={(e) => updateFilters({ max_price: e.target.value })}
-              />
-            </div>
           </div>
         </div>
       </Drawer>

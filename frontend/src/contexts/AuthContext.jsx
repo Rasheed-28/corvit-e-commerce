@@ -28,6 +28,20 @@ export const AuthProvider = ({ children }) => {
     fetchCurrentUser();
   }, [fetchCurrentUser]);
 
+  // Handle global auth expiration events from Axios interceptors
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setUser(null);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('auth:expired', handleAuthExpired);
+      return () => {
+        window.removeEventListener('auth:expired', handleAuthExpired);
+      };
+    }
+  }, []);
+
   const login = async (credentials) => {
     const response = await authApi.login(credentials);
     if (response?.success && response.data?.user) {

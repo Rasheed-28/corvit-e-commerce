@@ -1,24 +1,31 @@
-import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useMemo, useCallback, useEffect } from 'react';
 import { useNotification } from './NotificationContext';
 
 const CartContext = createContext(null);
+const STORAGE_KEY = 'novastore_cart';
 
 export const CartProvider = ({ children }) => {
-  const [items, setItems] = useState([
-    // Starter preview item to immediately showcase the cart drawer in the design system
-    {
-      id: 'prod-1',
-      title: 'Aura Studio Wireless Over-Ear Headphones',
-      price: 249.00,
-      originalPrice: 299.00,
-      image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&q=80',
-      quantity: 1,
-      selectedVariant: 'Midnight Black',
-      maxStock: 12,
-    },
-  ]);
+  const [items, setItems] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {
+      // Fallback
+    }
+    return [];
+  });
   const [isCartOpen, setIsCartOpen] = useState(false);
   const { notify } = useNotification();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [items]);
 
   const addItem = useCallback((product, quantity = 1, selectedVariant = null) => {
     setItems((prevItems) => {
@@ -46,7 +53,7 @@ export const CartProvider = ({ children }) => {
           image: product.image || (product.images && product.images[0]) || '',
           quantity,
           selectedVariant: selectedVariant || product.selectedVariant || null,
-          maxStock: product.maxStock || 10,
+          maxStock: product.maxStock || product.stock || 10,
         },
       ];
     });
@@ -114,3 +121,5 @@ export const useCart = () => {
   }
   return context;
 };
+
+export default CartContext;
