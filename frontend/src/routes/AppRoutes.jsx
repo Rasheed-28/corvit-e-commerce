@@ -13,6 +13,7 @@ import { CustomerProfilePage } from '../pages/CustomerProfilePage';
 import { AddressBookPage } from '../pages/AddressBookPage';
 import { OrderHistoryPage } from '../pages/OrderHistoryPage';
 import { OrderDetailPage } from '../pages/OrderDetailPage';
+import { CheckoutPage } from '../pages/CheckoutPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 
 export const AppRoutes = () => {
@@ -41,6 +42,9 @@ export const AppRoutes = () => {
         {/* Customer Commerce Activities */}
         <Route path="wishlist" element={<WishlistPage />} />
         <Route path="cart" element={<CartPage />} />
+        <Route path="checkout" element={<CheckoutPage />} />
+        <Route path="checkout/success/:orderNumber" element={<OrderDetailPage isConfirmation={true} />} />
+        <Route path="orders/:orderNumber" element={<OrderDetailPage />} />
 
         {/* Customer Account & Settings */}
         <Route path="account" element={<CustomerProfilePage />} />

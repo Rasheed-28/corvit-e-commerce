@@ -6,12 +6,13 @@ import { QuantityPicker } from '../common/QuantityPicker';
 import { PriceDisplay } from '../common/PriceDisplay';
 import { EmptyState } from '../common/EmptyState';
 import { Trash2, ShoppingBag, ShieldCheck, ArrowRight, Truck } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 /**
  * Slide-over Cart Drawer with interactive item management and shipping progress.
  */
 export const CartDrawer = () => {
+  const navigate = useNavigate();
   const {
     items,
     totalItems,
@@ -64,7 +65,8 @@ export const CartDrawer = () => {
                 size="lg"
                 fullWidth
                 onClick={() => {
-                  alert('Checkout flow will be enabled in the upcoming Checkout milestone!');
+                  closeCart();
+                  navigate('/checkout');
                 }}
                 leftIcon={<ShieldCheck className="w-5 h-5" />}
                 rightIcon={<ArrowRight className="w-4 h-4" />}

@@ -1,9 +1,10 @@
+import uuid
 from decimal import Decimal
+from datetime import timedelta
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from datetime import timedelta
 from rest_framework import status
 from rest_framework.test import APIClient
 from apps.accounts.models import Address
@@ -13,45 +14,62 @@ from apps.orders.models import Coupon, Order, OrderItem, Payment
 
 User = get_user_model()
 
-class OrdersModelAndAPITests(TestCase):
+
+class OrdersWorkflowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.buyer = User.objects.create_user(username='buyer', email='buyer@example.com', password='password123')
-        self.other_buyer = User.objects.create_user(username='other', email='other@example.com', password='password123')
+        self.buyer = User.objects.create_user(
+            username='buyer@example.com',
+            email='buyer@example.com',
+            password='Password123!',
+            first_name='Buyer',
+            last_name='One'
+        )
+        self.other_buyer = User.objects.create_user(
+            username='other@example.com',
+            email='other@example.com',
+            password='Password123!',
+            first_name='Other',
+            last_name='User'
+        )
 
         self.address = Address.objects.create(
             user=self.buyer,
             full_name='Buyer Name',
+            phone_number='+15551234567',
             street_address_1='456 Elm Street',
             city='Dallas',
             state_or_province='TX',
             postal_code='75001',
-            country='US'
+            country='United States'
         )
 
         self.category = ProductCategory.objects.create(name='Audio', slug='audio')
         self.product = Product.objects.create(
             category=self.category,
-            title='Wireless Noise-Cancelling Headphones',
-            slug='wireless-headphones',
+            title='Wireless Studio Headphones',
+            slug='wireless-studio-headphones',
             sku='AUD-HEAD-01',
-            base_price=Decimal('199.99'),
+            base_price=Decimal('200.00'),
             is_active=True
         )
         self.variant = ProductVariant.objects.create(
             product=self.product,
-            name='Color: Midnight Black',
+            name='Color: Matte Black',
             sku='AUD-HEAD-BLK',
-            price_override=Decimal('219.99'),
+            price_override=Decimal('220.00'),
             is_active=True
         )
         self.inventory = Inventory.objects.create(
             variant=self.variant,
-            quantity=20,
+            quantity=10,
             reserved_quantity=0
         )
 
-    # 1. Model Logic Tests
+    # ==========================================
+    # 1. Historical Snapshots & Immutability
+    # ==========================================
+
     def test_order_item_historical_snapshot(self):
         order = Order.objects.create(user=self.buyer)
         item = OrderItem.objects.create(
@@ -64,22 +82,26 @@ class OrdersModelAndAPITests(TestCase):
             unit_price=self.variant.effective_price,
             quantity=2
         )
-        self.assertEqual(item.line_total, Decimal('439.98'))
+        self.assertEqual(item.line_total, Decimal('440.00'))
 
-        # Mutate the source product & variant
+        # Mutate the source product & variant catalog values
         self.product.title = 'Updated Title 2027'
-        self.product.base_price = Decimal('299.99')
+        self.product.base_price = Decimal('300.00')
         self.product.save()
+        self.variant.price_override = Decimal('350.00')
+        self.variant.save()
 
-        # Reload order item from db: historical values MUST remain unchanged
+        # Reload order item: historical values MUST remain immutable
         item.refresh_from_db()
-        self.assertEqual(item.product_title, 'Wireless Noise-Cancelling Headphones')
-        self.assertEqual(item.unit_price, Decimal('219.99'))
-        self.assertEqual(item.line_total, Decimal('439.98'))
+        self.assertEqual(item.product_title, 'Wireless Studio Headphones')
+        self.assertEqual(item.unit_price, Decimal('220.00'))
+        self.assertEqual(item.line_total, Decimal('440.00'))
 
-    # 2. Checkout API Tests (Success Responses)
-    def test_checkout_success(self):
-        # Set up active cart with items
+    # ==========================================
+    # 2. Checkout Execution & Server Calculations
+    # ==========================================
+
+    def test_checkout_success_with_saved_address(self):
         cart = Cart.objects.create(user=self.buyer, is_active=True)
         CartItem.objects.create(
             cart=cart,
@@ -93,68 +115,355 @@ class OrdersModelAndAPITests(TestCase):
         self.client.force_authenticate(user=self.buyer)
         payload = {
             'shipping_address_id': str(self.address.id),
-            'customer_notes': 'Please ring doorbell on arrival'
+            'customer_notes': 'Handle with care',
+            'payment_method': 'CREDIT_CARD'
         }
-        response = self.client.post(url, payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(response.data['success'])
-        order_data = response.data['data']
-        self.assertIn('order_number', order_data)
-        # Server subtotal = 2 * $219.99 = $439.98
-        self.assertEqual(Decimal(str(order_data['subtotal'])), Decimal('439.98'))
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(res.data['success'])
 
-        # Verify inventory was decremented
+        data = res.data['data']
+        self.assertIn('order_number', data)
+        self.assertEqual(data['status'], Order.OrderStatus.PENDING)
+        # Subtotal: 2 * 220.00 = 440.00 (qualifies for free shipping >= 50.00)
+        self.assertEqual(Decimal(str(data['subtotal'])), Decimal('440.00'))
+        self.assertEqual(Decimal(str(data['shipping_fee'])), Decimal('0.00'))
+        # Tax: 8% of 440.00 = 35.20
+        self.assertEqual(Decimal(str(data['tax_amount'])), Decimal('35.20'))
+        # Total: 440.00 + 35.20 = 475.20
+        self.assertEqual(Decimal(str(data['total_amount'])), Decimal('475.20'))
+
+        # Verify address snapshot
+        self.assertEqual(data['shipping_address_snapshot']['street_address_1'], '456 Elm Street')
+
+        # Verify inventory decremented from 10 to 8
         self.inventory.refresh_from_db()
-        self.assertEqual(self.inventory.quantity, 18)
+        self.assertEqual(self.inventory.quantity, 8)
 
-    # 3. Invalid Input (Empty Cart Checkout)
-    def test_checkout_fails_with_empty_cart(self):
+        # Verify cart deactivated
+        cart.refresh_from_db()
+        self.assertFalse(cart.is_active)
+
+    def test_checkout_success_with_new_address_input(self):
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+
+        url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        payload = {
+            'shipping_address': {
+                'full_name': 'Jane Doe',
+                'phone_number': '+15559876543',
+                'street_address_1': '789 Pine Ave',
+                'city': 'Austin',
+                'state_or_province': 'TX',
+                'postal_code': '78701',
+                'country': 'United States',
+                'save_to_address_book': True
+            },
+            'customer_notes': 'Leave on porch'
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['data']['shipping_address_snapshot']['full_name'], 'Jane Doe')
+
+        # Verify newly saved address was created in address book
+        saved = Address.objects.filter(user=self.buyer, street_address_1='789 Pine Ave').first()
+        self.assertIsNotNone(saved)
+
+    def test_checkout_server_calculates_totals_never_trusts_frontend(self):
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+
+        url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        # Malicious client sends $1.00 subtotal and $0.00 total
+        payload = {
+            'shipping_address_id': str(self.address.id),
+            'subtotal': '1.00',
+            'total_amount': '1.00',
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        # Server must enforce actual catalog price 220.00 + 8% tax 17.60 = 237.60
+        self.assertEqual(Decimal(str(res.data['data']['subtotal'])), Decimal('220.00'))
+        self.assertEqual(Decimal(str(res.data['data']['total_amount'])), Decimal('237.60'))
+
+    # ==========================================
+    # 3. Stock Shortages, Validation & Idempotency
+    # ==========================================
+
+    def test_checkout_stock_shortage_aborts_transaction(self):
+        # Cart requests 15 units, but inventory only has 10
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=15,
+            unit_price=self.variant.effective_price
+        )
+
         url = reverse('orders:order-list-create')
         self.client.force_authenticate(user=self.buyer)
         payload = {'shipping_address_id': str(self.address.id)}
-        response = self.client.post(url, payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertFalse(response.data['success'])
-        self.assertEqual(response.data['error']['code'], 'EMPTY_CART')
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error']['code'], 'INSUFFICIENT_STOCK')
 
-    # 4. Unauthenticated Checkout Attempt
-    def test_unauthenticated_checkout(self):
+        # Verify inventory unchanged
+        self.inventory.refresh_from_db()
+        self.assertEqual(self.inventory.quantity, 10)
+
+        # Verify no order created
+        self.assertEqual(Order.objects.count(), 0)
+
+    def test_checkout_empty_cart_rejected(self):
         url = reverse('orders:order-list-create')
-        payload = {'shipping_address_id': str(self.address.id)}
-        response = self.client.post(url, payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'shipping_address_id': str(self.address.id)}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error']['code'], 'EMPTY_CART')
 
-    # 5. Unauthorized Order Access
-    def test_unauthorized_order_access(self):
+    def test_checkout_invalid_address_rejected(self):
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(cart=cart, product=self.product, variant=self.variant, quantity=1)
+
+        url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        # Random non-existent address ID
+        res = self.client.post(url, {'shipping_address_id': str(uuid.uuid4())}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_checkout_duplicate_request_idempotency(self):
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+
+        url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        idempotency_key = f"key_{uuid.uuid4()}"
+        payload = {
+            'shipping_address_id': str(self.address.id),
+            'idempotency_key': idempotency_key
+        }
+
+        # 1. First submission
+        res1 = self.client.post(url, payload, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_201_CREATED)
+        order_num = res1.data['data']['order_number']
+
+        # Inventory decremented from 10 to 9
+        self.inventory.refresh_from_db()
+        self.assertEqual(self.inventory.quantity, 9)
+
+        # 2. Repeated duplicate submission with same idempotency_key
+        res2 = self.client.post(url, payload, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(res2.data['data']['order_number'], order_num)
+
+        # Total orders in database must strictly be 1
+        self.assertEqual(Order.objects.filter(user=self.buyer).count(), 1)
+        # Inventory must NOT be double-decremented
+        self.inventory.refresh_from_db()
+        self.assertEqual(self.inventory.quantity, 9)
+
+    # ==========================================
+    # 4. Security & Permissions
+    # ==========================================
+
+    def test_unauthenticated_checkout_denied(self):
+        url = reverse('orders:order-list-create')
+        res = self.client.post(url, {'shipping_address_id': str(self.address.id)}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_unauthorized_order_access_denied(self):
         order = Order.objects.create(user=self.buyer, total_amount=Decimal('100.00'))
         url = reverse('orders:order-detail', kwargs={'order_number': order.order_number})
 
-        # 'other_buyer' attempts to view 'buyer' order
+        # other_buyer attempts to access buyer's order
         self.client.force_authenticate(user=self.other_buyer)
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
 
-    # 6. Coupon Validation API
-    def test_coupon_validation_endpoint(self):
+    # ==========================================
+    # 5. Payment Verification & Failure Handling
+    # ==========================================
+
+    def test_payment_success_transitions_order_status_to_paid(self):
+        order = Order.objects.create(
+            user=self.buyer,
+            status=Order.OrderStatus.PENDING,
+            total_amount=Decimal('237.60')
+        )
+        url = reverse('orders:order-payments', kwargs={'order_number': order.order_number})
+        self.client.force_authenticate(user=self.buyer)
+
+        payload = {
+            'payment_method': 'CREDIT_CARD',
+            'card_number': '4242424242424242',
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['data']['status'], 'COMPLETED')
+
+        # Verify order transitioned to PAID
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PAID)
+
+    def test_payment_failure_does_not_mark_order_paid(self):
+        order = Order.objects.create(
+            user=self.buyer,
+            status=Order.OrderStatus.PENDING,
+            total_amount=Decimal('237.60')
+        )
+        url = reverse('orders:order-payments', kwargs={'order_number': order.order_number})
+        self.client.force_authenticate(user=self.buyer)
+
+        payload = {
+            'payment_method': 'CREDIT_CARD',
+            'card_number': '4242424242420002',  # Simulated decline
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Order must remain PENDING
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+
+        # Failed payment audit record exists
+        payment = Payment.objects.filter(order=order).first()
+        self.assertIsNotNone(payment)
+        self.assertEqual(payment.status, Payment.PaymentStatus.FAILED)
+
+    # ==========================================
+    # 6. Cancellation & Inventory Restoration
+    # ==========================================
+
+    def test_order_cancellation_restores_inventory(self):
+        order = Order.objects.create(
+            user=self.buyer,
+            status=Order.OrderStatus.PENDING,
+            total_amount=Decimal('220.00')
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            variant=self.variant,
+            product_title=self.product.title,
+            variant_name=self.variant.name,
+            sku=self.variant.sku,
+            unit_price=Decimal('220.00'),
+            quantity=3,
+            line_total=Decimal('660.00')
+        )
+        # Simulate stock after order creation was 7 (10 - 3)
+        self.inventory.quantity = 7
+        self.inventory.save()
+
+        url = reverse('orders:order-cancel', kwargs={'order_number': order.order_number})
+        self.client.force_authenticate(user=self.buyer)
+        payload = {'reason': 'Found a better price elsewhere'}
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['data']['status'], Order.OrderStatus.CANCELLED)
+        self.assertEqual(res.data['data']['cancellation_reason'], 'Found a better price elsewhere')
+
+        # Verify inventory restored from 7 back to 10
+        self.inventory.refresh_from_db()
+        self.assertEqual(self.inventory.quantity, 10)
+
+    def test_order_cancellation_prohibited_after_shipment(self):
+        order = Order.objects.create(
+            user=self.buyer,
+            status=Order.OrderStatus.SHIPPED,
+            total_amount=Decimal('220.00')
+        )
+        url = reverse('orders:order-cancel', kwargs={'order_number': order.order_number})
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'reason': 'Want refund'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error']['code'], 'CANNOT_CANCEL')
+
+    # ==========================================
+    # 7. Order Preview & Coupon Validation
+    # ==========================================
+
+    def test_order_preview_endpoint(self):
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+
+        url = reverse('orders:order-preview')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertTrue(res.data['success'])
+        self.assertEqual(Decimal(str(res.data['data']['subtotal'])), Decimal('220.00'))
+        self.assertEqual(Decimal(str(res.data['data']['shipping_fee'])), Decimal('0.00'))
+        self.assertEqual(Decimal(str(res.data['data']['total_amount'])), Decimal('237.60'))
+
+    def test_coupon_validation_and_checkout_application(self):
         now = timezone.now()
-        Coupon.objects.create(
-            code='SAVE10',
+        coupon = Coupon.objects.create(
+            code='SAVE20',
             discount_type=Coupon.DiscountType.PERCENTAGE,
-            discount_value=Decimal('10.00'),
+            discount_value=Decimal('20.00'),
             minimum_order_amount=Decimal('50.00'),
             valid_from=now - timedelta(days=1),
             valid_to=now + timedelta(days=10),
             is_active=True
         )
 
-        url = reverse('orders:coupon-validate')
-        # Valid coupon
-        res = self.client.post(url, {'code': 'SAVE10', 'subtotal': '100.00'}, format='json')
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertTrue(res.data['success'])
-        self.assertEqual(Decimal(str(res.data['data']['discount_amount'])), Decimal('10.00'))
+        # 1. Validate endpoint
+        val_url = reverse('orders:coupon-validate')
+        val_res = self.client.post(val_url, {'code': 'SAVE20', 'cart_subtotal': '200.00'}, format='json')
+        self.assertEqual(val_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(Decimal(str(val_res.data['data']['discount_amount'])), Decimal('40.00'))
 
-        # Invalid coupon
-        bad_res = self.client.post(url, {'code': 'NOTREAL', 'subtotal': '100.00'}, format='json')
-        self.assertEqual(bad_res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertFalse(bad_res.data['success'])
+        # 2. Checkout with coupon
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+
+        checkout_url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(
+            checkout_url,
+            {'shipping_address_id': str(self.address.id), 'coupon_code': 'SAVE20'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        # 20% of 220 = 44.00
+        self.assertEqual(Decimal(str(res.data['data']['discount_amount'])), Decimal('44.00'))
+
+        # Usage count incremented
+        coupon.refresh_from_db()
+        self.assertEqual(coupon.times_used, 1)

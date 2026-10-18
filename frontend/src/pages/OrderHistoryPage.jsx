@@ -51,6 +51,13 @@ export const OrderHistoryPage = () => {
         return <Badge variant="info" size="sm" dot>In Transit</Badge>;
       case 'processing':
         return <Badge variant="warning" size="sm" dot>Processing</Badge>;
+      case 'paid':
+        return <Badge variant="success" size="sm" dot>Paid</Badge>;
+      case 'cancelled':
+        return <Badge variant="danger" size="sm" dot>Cancelled</Badge>;
+      case 'pending':
+      case 'pending payment':
+        return <Badge variant="warning" size="sm" dot>Pending Payment</Badge>;
       default:
         return <Badge variant="neutral" size="sm">{status}</Badge>;
     }

@@ -179,6 +179,8 @@ class Order(TimeStampedUUIDModel):
         related_name='orders'
     )
     customer_notes = models.TextField(blank=True)
+    idempotency_key = models.CharField(max_length=128, null=True, blank=True, unique=True, db_index=True)
+    cancellation_reason = models.TextField(blank=True)
 
     class Meta:
         verbose_name = 'Order'
@@ -203,6 +205,11 @@ class Order(TimeStampedUUIDModel):
             self.subtotal + self.shipping_fee + self.tax_amount - self.discount_amount
         ).quantize(Decimal('0.01'))
         return self.total_amount
+
+    @property
+    def can_cancel(self) -> bool:
+        """Returns True if the order is in a state that permits customer cancellation."""
+        return self.status in [self.OrderStatus.PENDING, self.OrderStatus.PAID, self.OrderStatus.PROCESSING]
 
     def snapshot_addresses(self):
         """Preserves immutable address snapshots at checkout time."""

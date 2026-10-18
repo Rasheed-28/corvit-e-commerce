@@ -57,7 +57,10 @@ export function normalizeOrder(o) {
     ...o,
     id: o.id,
     orderNumber: o.order_number || o.orderNumber,
-    status: o.status ? o.status.charAt(0).toUpperCase() + o.status.slice(1) : 'Processing',
+    status: o.status
+      ? o.status.charAt(0).toUpperCase() + o.status.slice(1).toLowerCase()
+      : 'Processing',
+    rawStatus: o.status || 'PENDING',
     date: o.created_at ? new Date(o.created_at).toLocaleDateString() : o.date || 'Recent',
     total,
     itemsCount: o.items_count ?? items.length,
@@ -116,10 +119,31 @@ export const ordersApi = {
   },
 
   /**
+   * Calculates exact server totals, discounts, taxes, and shipping for checkout preview
+   */
+  async previewOrder(previewData = {}) {
+    return axiosClient.post(`${API_ROUTES.ORDERS.ROOT}preview/`, previewData);
+  },
+
+  /**
    * Places an order from the active user cart
    */
   async createOrder(checkoutData) {
     return axiosClient.post(API_ROUTES.ORDERS.ROOT, checkoutData);
+  },
+
+  /**
+   * Processes a payment transaction for an existing order
+   */
+  async processPayment(orderNumber, paymentData) {
+    return axiosClient.post(`${API_ROUTES.ORDERS.ROOT}${orderNumber}/payments/`, paymentData);
+  },
+
+  /**
+   * Cancels an order before shipment and triggers inventory restoration
+   */
+  async cancelOrder(orderNumber, reason = 'Cancelled by customer') {
+    return axiosClient.post(`${API_ROUTES.ORDERS.ROOT}${orderNumber}/cancel/`, { reason });
   },
 
   /**

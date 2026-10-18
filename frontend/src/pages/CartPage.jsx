@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ShoppingBag,
   Trash2,
@@ -21,6 +21,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { ordersApi } from '../api/ordersApi';
 
 export const CartPage = () => {
+  const navigate = useNavigate();
   const { items, totalItems, subtotal, updateQuantity, removeItem, clearCart, isItemUpdating } = useCart();
   const { notify } = useNotification();
 
@@ -285,9 +286,7 @@ export const CartPage = () => {
                 variant="primary"
                 size="lg"
                 fullWidth
-                onClick={() => {
-                  alert('Proceeding to checkout flow! (Full checkout processing will be connected in milestone 3).');
-                }}
+                onClick={() => navigate('/checkout')}
                 leftIcon={<ShieldCheck className="w-5 h-5" />}
                 rightIcon={<ArrowRight className="w-4 h-4" />}
               >
