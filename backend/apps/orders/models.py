@@ -299,6 +299,8 @@ class OrderItem(TimeStampedUUIDModel):
 class Payment(TimeStampedUUIDModel):
     """
     Payment transaction audit record linked to an Order.
+    Stores only non-sensitive metadata (card_brand, card_last4, transaction_id).
+    Strictly forbids raw credit card numbers or CVV persistence.
     """
     class PaymentMethod(models.TextChoices):
         CREDIT_CARD = 'CREDIT_CARD', 'Credit Card'
@@ -309,8 +311,10 @@ class Payment(TimeStampedUUIDModel):
 
     class PaymentStatus(models.TextChoices):
         PENDING = 'PENDING', 'Pending'
+        SUCCESSFUL = 'SUCCESSFUL', 'Successful'
         COMPLETED = 'COMPLETED', 'Completed'
         FAILED = 'FAILED', 'Failed'
+        CANCELLED = 'CANCELLED', 'Cancelled'
         REFUNDED = 'REFUNDED', 'Refunded'
 
     order = models.ForeignKey(
@@ -321,6 +325,23 @@ class Payment(TimeStampedUUIDModel):
     transaction_id = models.CharField(
         max_length=128,
         unique=True,
+        db_index=True
+    )
+    gateway = models.CharField(
+        max_length=50,
+        default='simulated',
+        db_index=True
+    )
+    payment_intent_id = models.CharField(
+        max_length=128,
+        blank=True,
+        default='',
+        db_index=True
+    )
+    idempotency_key = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
         db_index=True
     )
     payment_method = models.CharField(
@@ -339,6 +360,18 @@ class Payment(TimeStampedUUIDModel):
         validators=[MinValueValidator(Decimal('0.01'))]
     )
     currency = models.CharField(max_length=3, default='USD')
+    card_brand = models.CharField(max_length=30, blank=True, default='')
+    card_last4 = models.CharField(max_length=4, blank=True, default='')
+    client_secret = models.CharField(max_length=255, blank=True, default='')
+    refund_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))]
+    )
+    refund_reason = models.TextField(blank=True, default='')
+    error_code = models.CharField(max_length=100, blank=True, default='')
+    error_message = models.TextField(blank=True, default='')
     gateway_response = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -347,7 +380,16 @@ class Payment(TimeStampedUUIDModel):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['order', 'status']),
+            models.Index(fields=['transaction_id']),
+            models.Index(fields=['payment_intent_id']),
+            models.Index(fields=['idempotency_key']),
         ]
 
     def __str__(self):
         return f"Payment {self.transaction_id} ({self.status}) - ${self.amount}"
+
+    @property
+    def is_successful(self) -> bool:
+        """Returns True if payment has been successfully captured and verified."""
+        return self.status in [self.PaymentStatus.COMPLETED, self.PaymentStatus.SUCCESSFUL]
+

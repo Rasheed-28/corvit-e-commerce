@@ -30,6 +30,13 @@ export const API_ROUTES = {
     ROOT: '/orders/',
     COUPONS_VALIDATE: '/orders/coupons/validate/',
   },
+  PAYMENTS: {
+    CONFIG: '/payments/config/',
+    INTENT: '/payments/intent/',
+    CONFIRM: '/payments/confirm/',
+    REFUND: (transactionId) => `/payments/refund/${transactionId}/`,
+  },
 };
+
 
 export const DEFAULT_PAGE_SIZE = 12;

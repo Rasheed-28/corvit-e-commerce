@@ -295,16 +295,18 @@ export const CheckoutPage = () => {
       }
 
       // Card/Stripe/PayPal Payment Execution
-      const cardNumToSubmit = simulateDecline
-        ? '4242424242420002'
-        : cardData.rawCardNumber || '4242424242424242';
+      // Secure tokenization: never submit raw card PAN or CVV to storage endpoints
+      const paymentToken = simulateDecline
+        ? 'tok_test_declined'
+        : 'tok_test_success';
 
       try {
         const paymentRes = await ordersApi.processPayment(orderNumber, {
           payment_method: paymentMethod,
-          card_number: cardNumToSubmit,
+          payment_token: paymentToken,
           simulate_failure: simulateDecline,
         });
+
 
         if (paymentRes?.success) {
           clearCart();

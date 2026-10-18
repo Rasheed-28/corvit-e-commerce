@@ -43,10 +43,12 @@ class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment
         fields = (
-            'id', 'transaction_id', 'payment_method',
-            'status', 'amount', 'currency', 'gateway_response', 'created_at'
+            'id', 'transaction_id', 'gateway', 'payment_method',
+            'status', 'amount', 'currency', 'card_brand', 'card_last4',
+            'refund_amount', 'refund_reason', 'gateway_response', 'created_at'
         )
         read_only_fields = ('id', 'created_at')
+
 
 
 class OrderListSerializer(serializers.ModelSerializer):
@@ -160,11 +162,16 @@ class CancelOrderSerializer(serializers.Serializer):
 
 
 class CreatePaymentSerializer(serializers.Serializer):
-    payment_method = serializers.ChoiceField(choices=Payment.PaymentMethod.choices)
+    payment_method = serializers.ChoiceField(
+        choices=Payment.PaymentMethod.choices,
+        default=Payment.PaymentMethod.CREDIT_CARD
+    )
     transaction_id = serializers.CharField(max_length=128, required=False, allow_blank=True)
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    payment_token = serializers.CharField(max_length=255, required=False, allow_blank=True)
     card_number = serializers.CharField(max_length=30, required=False, allow_blank=True)
     simulate_failure = serializers.BooleanField(default=False)
+    idempotency_key = serializers.CharField(max_length=128, required=False, allow_blank=True)
 
     def validate(self, attrs):
         order = self.context['order']
@@ -175,50 +182,43 @@ class CreatePaymentSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
+        from apps.payments.services import PaymentService
+        from apps.payments.exceptions import DuplicatePaymentError, PaymentError
+
         order = self.context['order']
-        amount = validated_data.get('amount') or order.total_amount
-        transaction_id = validated_data.get('transaction_id') or f"TXN-{uuid.uuid4().hex[:12].upper()}"
-        payment_method = validated_data['payment_method']
-        card_number = validated_data.get('card_number', '').replace(' ', '')
+        payment_method = validated_data.get('payment_method', Payment.PaymentMethod.CREDIT_CARD)
+        transaction_id = validated_data.get('transaction_id')
         simulate_failure = validated_data.get('simulate_failure', False)
+        payment_token = validated_data.get('payment_token', '')
+        idempotency_key = validated_data.get('idempotency_key')
+        card_number = str(validated_data.get('card_number') or '').replace(' ', '').replace('-', '')
 
-        # Server-side payment gateway simulation & verification
-        # Never mark an order paid if payment processing fails
-        is_failure = (
-            simulate_failure or
-            card_number.endswith('0002') or
-            'fail' in card_number.lower()
-        )
+        if not payment_token:
+            if simulate_failure or card_number.endswith('0002') or 'fail' in card_number.lower():
+                payment_token = 'tok_test_declined'
+            else:
+                payment_token = 'tok_test_success'
 
-        if is_failure:
-            payment = Payment.objects.create(
+        try:
+            verification, payment = PaymentService.confirm_and_verify_payment(
                 order=order,
                 transaction_id=transaction_id,
+                payment_token=payment_token,
                 payment_method=payment_method,
-                status=Payment.PaymentStatus.FAILED,
-                amount=amount,
-                currency=order.currency,
-                gateway_response={
-                    'decline_code': 'card_declined',
-                    'message': 'The payment transaction was declined by the issuer bank.'
-                }
+                idempotency_key=idempotency_key,
+                options={'simulate_failure': simulate_failure}
             )
-            raise serializers.ValidationError({
-                "payment": "Your payment method was declined. Please try another card or payment method."
-            })
 
-        payment = Payment.objects.create(
-            order=order,
-            transaction_id=transaction_id,
-            payment_method=payment_method,
-            status=Payment.PaymentStatus.COMPLETED,
-            amount=amount,
-            currency=order.currency,
-            gateway_response={'status': 'succeeded', 'charge_id': transaction_id}
-        )
+            if not verification.success or payment.status == Payment.PaymentStatus.FAILED:
+                raise serializers.ValidationError({
+                    "payment": payment.error_message or "Your payment method was declined. Please try another card or payment method."
+                })
 
-        # Update order status to PAID
-        order.status = Order.OrderStatus.PAID
-        order.save(update_fields=['status', 'updated_at'])
+            return payment
+        except DuplicatePaymentError as exc:
+            raise serializers.ValidationError({"payment": exc.message})
+        except serializers.ValidationError:
+            raise
+        except Exception as exc:
+            raise serializers.ValidationError({"payment": str(exc)})
 
-        return payment

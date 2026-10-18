@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'apps.catalog',
     'apps.cart',
     'apps.orders',
+    'apps.payments',
 ]
 
 MIDDLEWARE = [
@@ -188,4 +189,43 @@ REST_FRAMEWORK = {
 if DEBUG:
     REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'].append('rest_framework.renderers.BrowsableAPIRenderer')
 
+# Payment Gateway Configuration
+# Defaults safely to 'simulated' for local development & CI tests.
+# Live provider credentials remain strictly on the backend.
+PAYMENT_GATEWAY = os.environ.get('PAYMENT_GATEWAY', 'simulated')
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
+STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+SIMULATED_WEBHOOK_SECRET = os.environ.get('SIMULATED_WEBHOOK_SECRET', SECRET_KEY)
 
+# Logging configuration for diagnostic audit trails with sensitive data scrubbing
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'sensitive_data_filter': {
+            '()': 'apps.payments.utils.logger.SensitiveDataFilter',
+        },
+    },
+    'formatters': {
+        'standard': {
+            'format': '[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+            'filters': ['sensitive_data_filter'],
+        },
+    },
+    'loggers': {
+        'apps.payments': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

@@ -8,5 +8,4 @@ python-dotenv>=1.0
 django-filter>=24.0
 inflection>=0.5.1
 Pillow>=10.0.0
-
-
+stripe>=10.0.0
