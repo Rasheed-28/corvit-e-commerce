@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Heart, User, Menu, Sparkles } from 'lucide-react';
+import { ShoppingBag, Heart, User, Menu, Sparkles, ShieldCheck } from 'lucide-react';
 import { useCart } from '../../contexts/CartContext';
 import { useWishlist } from '../../contexts/WishlistContext';
 import { useAuth } from '../../hooks/useAuth';
@@ -13,7 +13,7 @@ import { MobileNavDrawer } from './MobileNavDrawer';
 export const Navbar = () => {
   const { totalItems, openCart, subtotal } = useCart();
   const { totalWishlistItems } = useWishlist();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isAdmin } = useAuth();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const location = useLocation();
@@ -117,6 +117,18 @@ export const Navbar = () => {
                   </span>
                 )}
               </Link>
+
+              {/* Staff Administrator Quick Switch */}
+              {isAdmin && (
+                <Link
+                  to="/admin"
+                  className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors"
+                  title="Admin Dashboard"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Admin</span>
+                </Link>
+              )}
 
               {/* User Account / Sign In */}
               <Link

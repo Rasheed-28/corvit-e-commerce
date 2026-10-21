@@ -36,6 +36,17 @@ export const API_ROUTES = {
     CONFIRM: '/payments/confirm/',
     REFUND: (transactionId) => `/payments/refund/${transactionId}/`,
   },
+  ADMIN: {
+    OVERVIEW: '/admin/overview/',
+    SALES_REPORT: '/admin/reports/sales/',
+    PRODUCTS: '/admin/products/',
+    CATEGORIES: '/admin/categories/',
+    INVENTORY: '/admin/inventory/',
+    ORDERS: '/admin/orders/',
+    CUSTOMERS: '/admin/customers/',
+    COUPONS: '/admin/coupons/',
+    REVIEWS: '/admin/reviews/',
+  },
 };
 
 

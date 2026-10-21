@@ -1,0 +1,9 @@
+export { AdminOverviewPage } from './AdminOverviewPage';
+export { AdminProductsPage } from './AdminProductsPage';
+export { AdminCategoriesPage } from './AdminCategoriesPage';
+export { AdminInventoryPage } from './AdminInventoryPage';
+export { AdminOrdersPage } from './AdminOrdersPage';
+export { AdminCustomersPage } from './AdminCustomersPage';
+export { AdminCouponsPage } from './AdminCouponsPage';
+export { AdminReviewsPage } from './AdminReviewsPage';
+export { AdminReportsPage } from './AdminReportsPage';

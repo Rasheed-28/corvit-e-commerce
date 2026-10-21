@@ -1,6 +1,10 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { RootLayout } from '../layouts/RootLayout';
+import { AdminLayout } from '../layouts/AdminLayout';
+import { AdminRoute } from '../components/admin/AdminRoute';
+
+// Storefront Pages
 import { HomePage } from '../pages/HomePage';
 import { ProductListPage } from '../pages/ProductListPage';
 import { ProductDetailPage } from '../pages/ProductDetailPage';
@@ -16,9 +20,23 @@ import { OrderDetailPage } from '../pages/OrderDetailPage';
 import { CheckoutPage } from '../pages/CheckoutPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 
+// Administration Pages
+import {
+  AdminOverviewPage,
+  AdminProductsPage,
+  AdminCategoriesPage,
+  AdminInventoryPage,
+  AdminOrdersPage,
+  AdminCustomersPage,
+  AdminCouponsPage,
+  AdminReviewsPage,
+  AdminReportsPage,
+} from '../pages/admin';
+
 export const AppRoutes = () => {
   return (
     <Routes>
+      {/* Storefront Customer Routes */}
       <Route path="/" element={<RootLayout />}>
         {/* Storefront Home */}
         <Route index element={<HomePage />} />
@@ -56,6 +74,29 @@ export const AppRoutes = () => {
         {/* 404 Catch-All */}
         <Route path="*" element={<NotFoundPage />} />
       </Route>
+
+      {/* Protected Administrator Dashboard */}
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminLayout />
+          </AdminRoute>
+        }
+      >
+        <Route index element={<AdminOverviewPage />} />
+        <Route path="overview" element={<Navigate to="/admin" replace />} />
+        <Route path="products" element={<AdminProductsPage />} />
+        <Route path="categories" element={<AdminCategoriesPage />} />
+        <Route path="inventory" element={<AdminInventoryPage />} />
+        <Route path="orders" element={<AdminOrdersPage />} />
+        <Route path="customers" element={<AdminCustomersPage />} />
+        <Route path="coupons" element={<AdminCouponsPage />} />
+        <Route path="reviews" element={<AdminReviewsPage />} />
+        <Route path="reports" element={<AdminReportsPage />} />
+      </Route>
     </Routes>
   );
 };
+
+export default AppRoutes;

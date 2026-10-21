@@ -176,6 +176,7 @@ axiosClient.interceptors.response.use(
           : 'UNKNOWN_ERROR'),
       status: error.response?.status,
       details,
+      response: error.response,
     };
 
     return Promise.reject(normalizedError);

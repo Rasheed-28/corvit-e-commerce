@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Drawer } from '../common/Drawer';
 import { Link } from 'react-router-dom';
 import { SearchInput } from '../common/SearchInput';
-import { User, Heart, Sparkles, Phone } from 'lucide-react';
+import { User, Heart, Sparkles, Phone, ShieldCheck } from 'lucide-react';
 import { catalogApi } from '../../api/catalogApi';
 import { useWishlist } from '../../contexts/WishlistContext';
 import { useAuth } from '../../hooks/useAuth';
@@ -26,7 +26,7 @@ export const MobileNavDrawer = ({
   onSearchSubmit,
 }) => {
   const { totalWishlistItems } = useWishlist();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isAdmin } = useAuth();
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
 
   useEffect(() => {
@@ -131,6 +131,16 @@ export const MobileNavDrawer = ({
 
         {/* Account & Help */}
         <div className="pt-4 border-t border-gray-100 space-y-2">
+          {isAdmin && (
+            <Link
+              to="/admin"
+              onClick={onClose}
+              className="flex items-center gap-2.5 p-2.5 rounded-xl text-sm font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              <ShieldCheck className="w-4 h-4 text-indigo-600" />
+              <span>Admin Center</span>
+            </Link>
+          )}
           <Link
             to={isAuthenticated ? '/account' : '/login'}
             onClick={onClose}
