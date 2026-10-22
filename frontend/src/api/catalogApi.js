@@ -293,6 +293,11 @@ export const catalogApi = {
    * @param {string} slugOrId - Product slug or UUID
    * @param {Object} reviewData - { rating: 1-5, title: string, comment: string }
    */
+  /**
+   * Submits a customer review for a product
+   * @param {string} slugOrId - Product slug or UUID
+   * @param {Object} reviewData - { rating: 1-5, title: string, comment: string }
+   */
   async addProductReview(slugOrId, reviewData) {
     return axiosClient.post(
       `${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/reviews/`,
@@ -306,6 +311,32 @@ export const catalogApi = {
   async addReview(slugOrId, reviewData) {
     return this.addProductReview(slugOrId, reviewData);
   },
+
+  /**
+   * Retrieves the current customer's review for a product and verified-buyer qualification
+   * @param {string} slugOrId - Product slug or UUID
+   */
+  async getMyReview(slugOrId) {
+    return axiosClient.get(`${API_ROUTES.CATALOG.PRODUCTS}${slugOrId}/reviews/mine/`);
+  },
+
+  /**
+   * Updates an existing customer review
+   * @param {string} reviewId - UUID of the review
+   * @param {Object} reviewData - { rating, title, comment }
+   */
+  async updateReview(reviewId, reviewData) {
+    return axiosClient.patch(`${API_ROUTES.CATALOG.REVIEWS}${reviewId}/`, reviewData);
+  },
+
+  /**
+   * Deletes a customer review
+   * @param {string} reviewId - UUID of the review
+   */
+  async deleteReview(reviewId) {
+    return axiosClient.delete(`${API_ROUTES.CATALOG.REVIEWS}${reviewId}/`);
+  },
+
 
   // =========================================================================
   // Administrative Catalog Endpoints (Staff Only)

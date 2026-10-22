@@ -91,6 +91,12 @@ class AuthenticationAndAuthorizationTests(TestCase):
         self.assertTrue(cookies['refresh_token']['httponly'])
         self.assertEqual(cookies['access_token']['samesite'], 'Lax')
 
+        # Verify welcome email was dispatched fail-safely
+        self.assertEqual(len(mail.outbox), 1)
+        welcome_mail = mail.outbox[0]
+        self.assertIn("Welcome to Our Store!", welcome_mail.subject)
+        self.assertIn('newcustomer@example.com', welcome_mail.to)
+
     def test_passwords_never_stored_in_plaintext(self):
         user = User.objects.get(username='customer_a')
         self.assertNotEqual(user.password, 'StrongPassword123!')

@@ -486,6 +486,55 @@ class ProductReviewListCreateView(generics.ListCreateAPIView):
         }, status=status.HTTP_201_CREATED)
 
 
+class ProductUserReviewView(APIView):
+    """
+    Retrieves the authenticated customer's review for a given product (if any),
+    and indicates whether the customer qualifies as a verified buyer.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, slug):
+        product = get_product_by_identifier(slug, queryset=Product.objects.filter(is_active=True))
+        if not request.user.is_authenticated:
+            return Response({
+                'success': True,
+                'data': {
+                    'has_reviewed': False,
+                    'review': None,
+                    'is_verified_purchase': False,
+                    'can_review': False,
+                }
+            })
+
+        user = request.user
+        existing_review = Review.objects.filter(product=product, user=user).first()
+
+        from apps.orders.models import Order
+        is_verified = Order.objects.filter(
+            user=user,
+            status__in=[
+                Order.OrderStatus.PAID,
+                Order.OrderStatus.PROCESSING,
+                Order.OrderStatus.SHIPPED,
+                Order.OrderStatus.DELIVERED
+            ],
+            items__product=product
+        ).exists()
+
+        serializer = ReviewSerializer(existing_review, context={'request': request}) if existing_review else None
+
+        return Response({
+            'success': True,
+            'data': {
+                'has_reviewed': existing_review is not None,
+                'review': serializer.data if serializer else None,
+                'is_verified_purchase': is_verified,
+                'can_review': existing_review is None,
+            }
+        })
+
+
+
 class ProductReviewDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     Retrieves, updates, or deletes a specific customer review.

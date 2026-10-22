@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal
 from datetime import timedelta
+from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -467,3 +468,232 @@ class OrdersWorkflowTests(TestCase):
         # Usage count incremented
         coupon.refresh_from_db()
         self.assertEqual(coupon.times_used, 1)
+
+    # ==========================================
+    # 8. Coupon Edge Cases & Safety Bounds
+    # ==========================================
+
+    def test_coupon_validation_expired(self):
+        now = timezone.now()
+        Coupon.objects.create(
+            code='EXPIRED10',
+            discount_type=Coupon.DiscountType.PERCENTAGE,
+            discount_value=Decimal('10.00'),
+            valid_from=now - timedelta(days=10),
+            valid_to=now - timedelta(days=1),
+            is_active=True
+        )
+        url = reverse('orders:coupon-validate')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'code': 'EXPIRED10', 'cart_subtotal': '100.00'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(res.data['success'])
+        self.assertEqual(res.data['error']['code'], 'VALIDATION_ERROR')
+        self.assertIn('expired', str(res.data['error']).lower())
+
+    def test_coupon_validation_not_yet_active(self):
+        now = timezone.now()
+        Coupon.objects.create(
+            code='FUTURE10',
+            discount_type=Coupon.DiscountType.PERCENTAGE,
+            discount_value=Decimal('10.00'),
+            valid_from=now + timedelta(days=2),
+            valid_to=now + timedelta(days=10),
+            is_active=True
+        )
+        url = reverse('orders:coupon-validate')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'code': 'FUTURE10', 'cart_subtotal': '100.00'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error']['code'], 'VALIDATION_ERROR')
+        self.assertIn('not started yet', str(res.data['error']).lower())
+
+    def test_coupon_validation_inactive(self):
+        now = timezone.now()
+        Coupon.objects.create(
+            code='DISABLED10',
+            discount_type=Coupon.DiscountType.PERCENTAGE,
+            discount_value=Decimal('10.00'),
+            valid_from=now - timedelta(days=1),
+            valid_to=now + timedelta(days=10),
+            is_active=False
+        )
+        url = reverse('orders:coupon-validate')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'code': 'DISABLED10', 'cart_subtotal': '100.00'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error']['code'], 'VALIDATION_ERROR')
+        self.assertIn('inactive', str(res.data['error']).lower())
+
+    def test_coupon_validation_min_order_unmet(self):
+        now = timezone.now()
+        Coupon.objects.create(
+            code='BIGSPENDER',
+            discount_type=Coupon.DiscountType.PERCENTAGE,
+            discount_value=Decimal('20.00'),
+            minimum_order_amount=Decimal('500.00'),
+            valid_from=now - timedelta(days=1),
+            valid_to=now + timedelta(days=10),
+            is_active=True
+        )
+        url = reverse('orders:coupon-validate')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'code': 'BIGSPENDER', 'cart_subtotal': '150.00'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error']['code'], 'VALIDATION_ERROR')
+        self.assertIn('minimum order amount', str(res.data['error']).lower())
+
+    def test_coupon_validation_usage_limit_reached(self):
+        now = timezone.now()
+        Coupon.objects.create(
+            code='LIMITED5',
+            discount_type=Coupon.DiscountType.FIXED_AMOUNT,
+            discount_value=Decimal('5.00'),
+            usage_limit=2,
+            times_used=2,
+            valid_from=now - timedelta(days=1),
+            valid_to=now + timedelta(days=10),
+            is_active=True
+        )
+        url = reverse('orders:coupon-validate')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'code': 'LIMITED5', 'cart_subtotal': '100.00'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error']['code'], 'VALIDATION_ERROR')
+        self.assertIn('maximum usage limit', str(res.data['error']).lower())
+
+    def test_checkout_with_expired_coupon_rejected(self):
+        now = timezone.now()
+        Coupon.objects.create(
+            code='EXPIRED_CHECKOUT',
+            discount_type=Coupon.DiscountType.FIXED_AMOUNT,
+            discount_value=Decimal('20.00'),
+            valid_from=now - timedelta(days=5),
+            valid_to=now - timedelta(days=1),
+            is_active=True
+        )
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+        checkout_url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(
+            checkout_url,
+            {'shipping_address_id': str(self.address.id), 'coupon_code': 'EXPIRED_CHECKOUT'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('expired', str(res.data['error']).lower())
+
+    def test_coupon_fixed_discount_capped_and_never_negative(self):
+        now = timezone.now()
+        Coupon.objects.create(
+            code='HUGE1000',
+            discount_type=Coupon.DiscountType.FIXED_AMOUNT,
+            discount_value=Decimal('1000.00'),
+            valid_from=now - timedelta(days=1),
+            valid_to=now + timedelta(days=10),
+            is_active=True
+        )
+        # Cart subtotal is $220.00
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+        checkout_url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(
+            checkout_url,
+            {'shipping_address_id': str(self.address.id), 'coupon_code': 'HUGE1000'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        # Discount should be capped at subtotal ($220.00)
+        self.assertEqual(Decimal(str(res.data['data']['discount_amount'])), Decimal('220.00'))
+        # Total amount must be non-negative
+        self.assertGreaterEqual(Decimal(str(res.data['data']['total_amount'])), Decimal('0.00'))
+
+    # ==========================================
+    # 9. Email Notification Workflows
+    # ==========================================
+
+    def test_order_confirmation_email_dispatched_on_checkout(self):
+        mail.outbox.clear()
+        cart = Cart.objects.create(user=self.buyer, is_active=True)
+        CartItem.objects.create(
+            cart=cart,
+            product=self.product,
+            variant=self.variant,
+            quantity=1,
+            unit_price=self.variant.effective_price
+        )
+        checkout_url = reverse('orders:order-list-create')
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(
+            checkout_url,
+            {'shipping_address_id': str(self.address.id), 'payment_method': 'CASH_ON_DELIVERY'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        order_number = res.data['data']['order_number']
+
+        # Verify confirmation email sent
+        self.assertEqual(len(mail.outbox), 1)
+        sent = mail.outbox[0]
+        self.assertIn(f"Order Confirmation: #{order_number}", sent.subject)
+        self.assertIn(self.buyer.email, sent.to)
+        self.assertIn(self.product.title, sent.body)
+        self.assertTrue(len(sent.alternatives) > 0)
+        self.assertEqual(sent.alternatives[0][1], 'text/html')
+
+    def test_order_status_update_email_dispatched_on_cancellation(self):
+        order = Order.objects.create(
+            user=self.buyer,
+            status=Order.OrderStatus.PENDING,
+            total_amount=Decimal('220.00')
+        )
+        mail.outbox.clear()
+
+        url = reverse('orders:order-cancel', kwargs={'order_number': order.order_number})
+        self.client.force_authenticate(user=self.buyer)
+        res = self.client.post(url, {'reason': 'Found better deal'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(len(mail.outbox), 1)
+        sent = mail.outbox[0]
+        self.assertIn(f"Order #{order.order_number} Update: Cancelled", sent.subject)
+        self.assertIn(self.buyer.email, sent.to)
+        self.assertIn("Found better deal", sent.body)
+
+    def test_order_status_update_email_dispatched_on_staff_status_update(self):
+        order = Order.objects.create(
+            user=self.buyer,
+            status=Order.OrderStatus.PROCESSING,
+            total_amount=Decimal('220.00')
+        )
+        staff_user = User.objects.create_superuser(
+            username='orders_staff',
+            email='staff@example.com',
+            password='Password123!'
+        )
+        mail.outbox.clear()
+
+        url = reverse('orders:order-detail', kwargs={'order_number': order.order_number})
+        self.client.force_authenticate(user=staff_user)
+        res = self.client.patch(url, {'status': Order.OrderStatus.SHIPPED}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(len(mail.outbox), 1)
+        sent = mail.outbox[0]
+        self.assertIn(f"Order #{order.order_number} Update: Shipped", sent.subject)
+        self.assertIn(self.buyer.email, sent.to)
+

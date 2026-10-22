@@ -563,3 +563,199 @@ class CatalogAPITests(TestCase):
         self.client.force_authenticate(user=self.customer)
         response = self.client.post(url, {'image': image_file}, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ProductReviewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.customer = User.objects.create_user(
+            username='reviewer_customer',
+            email='reviewer@example.com',
+            password='Password123!'
+        )
+        self.other_customer = User.objects.create_user(
+            username='other_reviewer',
+            email='other_rev@example.com',
+            password='Password123!'
+        )
+        self.staff_user = User.objects.create_user(
+            username='review_moderator',
+            email='moderator@example.com',
+            password='Password123!',
+            is_staff=True
+        )
+
+        self.category = ProductCategory.objects.create(name='Audio', slug='audio')
+        self.product = Product.objects.create(
+            category=self.category,
+            title='Premium Soundbar',
+            slug='premium-soundbar',
+            sku='SND-BAR-01',
+            base_price=Decimal('350.00'),
+            is_active=True
+        )
+
+    def test_authenticated_customer_can_post_review(self):
+        url = reverse('catalog:product-review-list-create', kwargs={'slug': self.product.slug})
+        self.client.force_authenticate(user=self.customer)
+
+        payload = {
+            'rating': 5,
+            'title': 'Stunning sound quality',
+            'comment': 'Clean bass response and crystal clear dialogue.'
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(response.data['data']['rating'], 5)
+        self.assertEqual(response.data['data']['title'], 'Stunning sound quality')
+        # Without an order, verified purchase must be False
+        self.assertFalse(response.data['data']['is_verified_purchase'])
+
+    def test_verified_purchase_indicator_for_actual_buyer(self):
+        from apps.orders.models import Order, OrderItem
+        # Create a paid order for this user containing this product
+        order = Order.objects.create(user=self.customer, status=Order.OrderStatus.PAID)
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_title=self.product.title,
+            sku=self.product.sku,
+            unit_price=Decimal('350.00'),
+            quantity=1,
+            line_total=Decimal('350.00')
+        )
+
+        url = reverse('catalog:product-review-list-create', kwargs={'slug': self.product.slug})
+        self.client.force_authenticate(user=self.customer)
+
+        payload = {
+            'rating': 5,
+            'title': 'Verified Purchase Review',
+            'comment': 'Verified acoustics are top tier!'
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['data']['is_verified_purchase'])
+
+    def test_unauthenticated_user_cannot_post_review(self):
+        url = reverse('catalog:product-review-list-create', kwargs={'slug': self.product.slug})
+        payload = {'rating': 4, 'title': 'Anon', 'comment': 'Nice product.'}
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_duplicate_review_rejected(self):
+        Review.objects.create(
+            product=self.product,
+            user=self.customer,
+            rating=5,
+            title='Initial Review',
+            comment='Good initial thoughts.'
+        )
+
+        url = reverse('catalog:product-review-list-create', kwargs={'slug': self.product.slug})
+        self.client.force_authenticate(user=self.customer)
+
+        payload = {'rating': 4, 'title': 'Second Review', 'comment': 'Trying again.'}
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error']['code'], 'DUPLICATE_REVIEW')
+
+    def test_customer_can_update_own_review_and_cannot_tamper_permissions(self):
+        review = Review.objects.create(
+            product=self.product,
+            user=self.customer,
+            rating=4,
+            title='Initial',
+            comment='Initial comment.',
+            is_approved=False,
+            is_verified_purchase=False
+        )
+
+        url = reverse('catalog:review-detail', kwargs={'id': review.id})
+        self.client.force_authenticate(user=self.customer)
+
+        # Attempt to escalate is_approved and is_verified_purchase
+        payload = {
+            'rating': 5,
+            'title': 'Updated Title',
+            'comment': 'Updated comment after weeks of testing.',
+            'is_approved': True,
+            'is_verified_purchase': True
+        }
+        response = self.client.patch(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['data']['rating'], 5)
+        self.assertEqual(response.data['data']['title'], 'Updated Title')
+
+        # Escalations must be stripped for non-staff
+        review.refresh_from_db()
+        self.assertFalse(review.is_approved)
+        self.assertFalse(review.is_verified_purchase)
+
+    def test_customer_cannot_update_or_delete_other_user_review(self):
+        review = Review.objects.create(
+            product=self.product,
+            user=self.customer,
+            rating=5,
+            title='Owner Review',
+            comment='Comment.'
+        )
+
+        url = reverse('catalog:review-detail', kwargs={'id': review.id})
+        self.client.force_authenticate(user=self.other_customer)
+
+        # Update attempt by different user
+        patch_res = self.client.patch(url, {'rating': 1}, format='json')
+        self.assertEqual(patch_res.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Delete attempt by different user
+        del_res = self.client.delete(url)
+        self.assertEqual(del_res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_customer_can_delete_own_review(self):
+        review = Review.objects.create(
+            product=self.product,
+            user=self.customer,
+            rating=3,
+            title='Old Review',
+            comment='No longer relevant.'
+        )
+
+        url = reverse('catalog:review-detail', kwargs={'id': review.id})
+        self.client.force_authenticate(user=self.customer)
+
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(Review.objects.filter(id=review.id).exists())
+
+    def test_get_my_review_endpoint(self):
+        url = reverse('catalog:product-user-review', kwargs={'slug': self.product.slug})
+
+        # 1. Unauthenticated -> has_reviewed: False, can_review: False
+        res_anon = self.client.get(url)
+        self.assertEqual(res_anon.status_code, status.HTTP_200_OK)
+        self.assertFalse(res_anon.data['data']['has_reviewed'])
+        self.assertFalse(res_anon.data['data']['can_review'])
+
+        # 2. Authenticated without review -> has_reviewed: False, can_review: True
+        self.client.force_authenticate(user=self.customer)
+        res_authed = self.client.get(url)
+        self.assertEqual(res_authed.status_code, status.HTTP_200_OK)
+        self.assertFalse(res_authed.data['data']['has_reviewed'])
+        self.assertTrue(res_authed.data['data']['can_review'])
+
+        # 3. Create review -> has_reviewed: True, can_review: False
+        Review.objects.create(
+            product=self.product,
+            user=self.customer,
+            rating=5,
+            title='My Soundbar',
+            comment='Awesome unit.'
+        )
+        res_reviewed = self.client.get(url)
+        self.assertEqual(res_reviewed.status_code, status.HTTP_200_OK)
+        self.assertTrue(res_reviewed.data['data']['has_reviewed'])
+        self.assertFalse(res_reviewed.data['data']['can_review'])
+        self.assertEqual(res_reviewed.data['data']['review']['title'], 'My Soundbar')
+

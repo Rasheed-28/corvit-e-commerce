@@ -99,12 +99,13 @@ class ValidateCouponSerializer(serializers.Serializer):
             raise serializers.ValidationError({"subtotal": "Subtotal amount is required to validate coupon."})
 
         try:
-            coupon = Coupon.objects.get(code__iexact=code, is_active=True)
+            coupon = Coupon.objects.get(code__iexact=code)
         except Coupon.DoesNotExist:
             raise serializers.ValidationError({"code": "Invalid or expired coupon code."})
 
-        if not coupon.is_valid_for_amount(subtotal):
-            raise serializers.ValidationError({"code": "Coupon conditions are not met or coupon has expired."})
+        err = coupon.get_validation_error(subtotal)
+        if err:
+            raise serializers.ValidationError({"code": err})
 
         discount = coupon.calculate_discount(subtotal)
         attrs['coupon_obj'] = coupon
@@ -149,7 +150,18 @@ class CheckoutSerializer(serializers.Serializer):
                     "billing_address_id": "Selected billing address was not found in your account."
                 })
 
+        coupon_code = attrs.get('coupon_code', '').strip()
+        if coupon_code:
+            try:
+                coupon = Coupon.objects.get(code__iexact=coupon_code)
+                attrs['coupon_obj'] = coupon
+            except Coupon.DoesNotExist:
+                raise serializers.ValidationError({
+                    "coupon_code": f"Coupon code '{coupon_code}' is invalid or expired."
+                })
+
         return attrs
+
 
 
 class OrderPreviewSerializer(serializers.Serializer):

@@ -139,9 +139,25 @@ class ReviewSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         request = self.context['request']
         product = self.context['product']
+        user = request.user
+
+        # Auto-compute verified purchase status from completed orders
+        from apps.orders.models import Order
+        is_verified = Order.objects.filter(
+            user=user,
+            status__in=[
+                Order.OrderStatus.PAID,
+                Order.OrderStatus.PROCESSING,
+                Order.OrderStatus.SHIPPED,
+                Order.OrderStatus.DELIVERED
+            ],
+            items__product=product
+        ).exists()
+
         return Review.objects.create(
-            user=request.user,
+            user=user,
             product=product,
+            is_verified_purchase=is_verified,
             **validated_data
         )
 
@@ -150,10 +166,31 @@ class ReviewSerializer(serializers.ModelSerializer):
         # Only administrative staff can change the review approval status
         if not (request and getattr(request.user, 'is_staff', False)):
             validated_data.pop('is_approved', None)
+            validated_data.pop('is_verified_purchase', None)
+        else:
+            if 'is_verified_purchase' in validated_data:
+                instance.is_verified_purchase = validated_data.pop('is_verified_purchase')
+
+        # If review was previously unverified, check if customer has since purchased the item
+        if not instance.is_verified_purchase and instance.user:
+            from apps.orders.models import Order
+            if Order.objects.filter(
+                user=instance.user,
+                status__in=[
+                    Order.OrderStatus.PAID,
+                    Order.OrderStatus.PROCESSING,
+                    Order.OrderStatus.SHIPPED,
+                    Order.OrderStatus.DELIVERED
+                ],
+                items__product=instance.product
+            ).exists():
+                instance.is_verified_purchase = True
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         return instance
+
 
 
 class ProductListSerializer(serializers.ModelSerializer):

@@ -217,6 +217,12 @@ class PaymentService:
                     f"[PaymentService] Payment verified for Order {locked_order.order_number}, "
                     f"tx={payment.transaction_id}, order moved to PAID."
                 )
+                try:
+                    from apps.orders.services import send_order_confirmation_email
+                    send_order_confirmation_email(locked_order)
+                except Exception as mail_exc:
+                    payment_logger.warning(f"Could not dispatch order confirmation email: {mail_exc}")
+
             elif final_status == 'FAILED':
                 payment.status = Payment.PaymentStatus.FAILED
                 payment.error_code = verification.error_code or 'PAYMENT_DECLINED'
@@ -312,6 +318,12 @@ class PaymentService:
                     order.status = Order.OrderStatus.PAID
                     order.save(update_fields=['status', 'updated_at'])
                     payment_logger.info(f"[PaymentService] Webhook updated order {order.order_number} to PAID.")
+                    try:
+                        from apps.orders.services import send_order_confirmation_email
+                        send_order_confirmation_email(order)
+                    except Exception as mail_exc:
+                        payment_logger.warning(f"Failed to send confirmation email on webhook: {mail_exc}")
+
 
             elif event.status == 'FAILED':
                 if payment and not payment.is_successful:
@@ -409,10 +421,17 @@ class PaymentService:
             locked_payment.refund_reason = reason
             if locked_payment.refund_amount >= locked_payment.amount:
                 locked_payment.status = Payment.PaymentStatus.REFUNDED
+                prev_order_status = locked_order.status
                 locked_order.status = Order.OrderStatus.REFUNDED
                 locked_order.save(update_fields=['status', 'updated_at'])
+                try:
+                    from apps.orders.services import send_order_status_update_email
+                    send_order_status_update_email(locked_order, prev_order_status, Order.OrderStatus.REFUNDED, reason=reason)
+                except Exception as mail_exc:
+                    payment_logger.warning(f"Failed to send refund notification email: {mail_exc}")
 
             locked_payment.save(update_fields=['status', 'refund_amount', 'refund_reason', 'updated_at'])
+
 
             payment_logger.info(
                 f"[PaymentService] Successfully processed refund {refund_res.refund_id} for order {locked_order.order_number}, "

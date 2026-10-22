@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Heart,
@@ -11,7 +11,12 @@ import {
   Star,
   MessageSquarePlus,
   Package,
+  Edit2,
+  Trash2,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
+
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { PriceDisplay } from '../components/common/PriceDisplay';
 import { RatingStars } from '../components/common/RatingStars';
@@ -49,12 +54,36 @@ export const ProductDetailPage = () => {
 
   // Review Form Modal State
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [reviewMode, setReviewMode] = useState('create'); // 'create' | 'edit'
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewTitle, setReviewTitle] = useState('');
   const [reviewComment, setReviewComment] = useState('');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [reviewError, setReviewError] = useState(null);
   const [reviewsList, setReviewsList] = useState([]);
+  const [userReview, setUserReview] = useState(null);
+  const [isVerifiedBuyer, setIsVerifiedBuyer] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeletingReview, setIsDeletingReview] = useState(false);
+
+  // Load customer's personal review and purchase verification
+  const loadUserReview = useCallback(async (productSlug) => {
+    if (!isAuthenticated) {
+      setUserReview(null);
+      setIsVerifiedBuyer(false);
+      return;
+    }
+    try {
+      const res = await catalogApi.getMyReview(productSlug);
+      if (res?.success && res.data) {
+        setUserReview(res.data.review);
+        setIsVerifiedBuyer(Boolean(res.data.is_verified_purchase));
+      }
+    } catch {
+      setUserReview(null);
+      setIsVerifiedBuyer(false);
+    }
+  }, [isAuthenticated]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -76,13 +105,18 @@ export const ProductDetailPage = () => {
             id: r.id,
             author: r.user
               ? `${r.user.first_name || ''} ${r.user.last_name || ''}`.trim() || r.user.username
-              : 'Verified Customer',
+              : 'Customer',
             rating: r.rating,
             date: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Recent',
             title: r.title,
             comment: r.comment,
+            isVerifiedPurchase: Boolean(r.is_verified_purchase),
+            userId: r.user?.id,
           }));
           setReviewsList(mappedReviews);
+
+          // Fetch user personal review if logged in
+          loadUserReview(prod.slug);
 
           // Fetch related products from backend
           return catalogApi.getRelatedProducts(prod.slug, prod.categorySlug, 4);
@@ -102,7 +136,8 @@ export const ProductDetailPage = () => {
       .finally(() => {
         setIsLoading(false);
       });
-  }, [slug]);
+  }, [slug, loadUserReview]);
+
 
   if (isLoading) {
     return (
@@ -160,6 +195,48 @@ export const ProductDetailPage = () => {
     }
   };
 
+  const refreshProductReviews = async () => {
+    try {
+      const updated = await catalogApi.getProduct(product.slug);
+      if (updated?.data?.reviews) {
+        const mappedReviews = updated.data.reviews.map((r) => ({
+          id: r.id,
+          author: r.user
+            ? `${r.user.first_name || ''} ${r.user.last_name || ''}`.trim() || r.user.username
+            : 'Customer',
+          rating: r.rating,
+          date: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Recent',
+          title: r.title,
+          comment: r.comment,
+          isVerifiedPurchase: Boolean(r.is_verified_purchase),
+          userId: r.user?.id,
+        }));
+        setReviewsList(mappedReviews);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh reviews:', err);
+    }
+  };
+
+  const handleOpenReviewModal = (mode = 'create') => {
+    setReviewError(null);
+    if (!isAuthenticated) {
+      notify.error('Please sign in to write a review.', 'Authentication Required');
+      return;
+    }
+    setReviewMode(mode);
+    if (mode === 'edit' && userReview) {
+      setReviewRating(userReview.rating || 5);
+      setReviewTitle(userReview.title || '');
+      setReviewComment(userReview.comment || '');
+    } else {
+      setReviewRating(5);
+      setReviewTitle('');
+      setReviewComment('');
+    }
+    setIsReviewModalOpen(true);
+  };
+
   const handleReviewSubmit = async (e) => {
     e.preventDefault();
     setReviewError(null);
@@ -177,42 +254,61 @@ export const ProductDetailPage = () => {
 
     setIsSubmittingReview(true);
     try {
-      const res = await catalogApi.addReview(product.slug, {
-        rating: reviewRating,
-        title: reviewTitle.trim(),
-        comment: reviewComment.trim(),
-      });
+      if (reviewMode === 'edit' && userReview) {
+        const res = await catalogApi.updateReview(userReview.id, {
+          rating: reviewRating,
+          title: reviewTitle.trim(),
+          comment: reviewComment.trim(),
+        });
+        if (res?.success) {
+          notify.success('Your review has been updated successfully!', 'Review Updated');
+          setIsReviewModalOpen(false);
+          await refreshProductReviews();
+          await loadUserReview(product.slug);
+        }
+      } else {
+        const res = await catalogApi.addReview(product.slug, {
+          rating: reviewRating,
+          title: reviewTitle.trim(),
+          comment: reviewComment.trim(),
+        });
 
-      if (res?.success) {
-        notify.success('Thank you for submitting your review!', 'Review Published');
-        setIsReviewModalOpen(false);
-        setReviewTitle('');
-        setReviewComment('');
-
-        // Refresh reviews list
-        const updated = await catalogApi.getProduct(product.slug);
-        if (updated?.data?.reviews) {
-          const mappedReviews = updated.data.reviews.map((r) => ({
-            id: r.id,
-            author: r.user
-              ? `${r.user.first_name || ''} ${r.user.last_name || ''}`.trim() || r.user.username
-              : 'Verified Customer',
-            rating: r.rating,
-            date: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Recent',
-            title: r.title,
-            comment: r.comment,
-          }));
-          setReviewsList(mappedReviews);
+        if (res?.success) {
+          notify.success('Thank you for submitting your review!', 'Review Published');
+          setIsReviewModalOpen(false);
+          setReviewTitle('');
+          setReviewComment('');
+          await refreshProductReviews();
+          await loadUserReview(product.slug);
         }
       }
     } catch (err) {
-      const msg = err.message || 'Failed to submit review. Each customer can review a product once.';
+      const msg = err.response?.data?.error?.message || err.message || 'Failed to submit review.';
       setReviewError(msg);
-      notify.error(msg, 'Review Submission Failed');
+      notify.error(msg, 'Review Action Failed');
     } finally {
       setIsSubmittingReview(false);
     }
   };
+
+  const handleDeleteReview = async () => {
+    if (!userReview) return;
+    setIsDeletingReview(true);
+    try {
+      await catalogApi.deleteReview(userReview.id);
+      notify.success('Your review has been removed.', 'Review Deleted');
+      setIsDeleteModalOpen(false);
+      setUserReview(null);
+      await refreshProductReviews();
+      await loadUserReview(product.slug);
+    } catch (err) {
+      const msg = err.response?.data?.error?.message || err.message || 'Failed to delete review.';
+      notify.error(msg, 'Review Deletion Failed');
+    } finally {
+      setIsDeletingReview(false);
+    }
+  };
+
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-16">
@@ -426,26 +522,96 @@ export const ProductDetailPage = () => {
       <section id="reviews" className="space-y-6 pt-6 border-t border-gray-200">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-black text-gray-950 tracking-tight">
-              Customer Feedback & Reviews
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-black text-gray-950 tracking-tight">
+                Customer Feedback & Reviews
+              </h2>
+              {isVerifiedBuyer && (
+                <Badge variant="success" size="sm" dot>Verified Buyer</Badge>
+              )}
+            </div>
             <p className="text-xs text-gray-500 mt-0.5">
               Verified community experiences with this piece ({reviewsList.length} reviews)
             </p>
           </div>
 
-          <Button
-            variant="outline"
-            size="md"
-            onClick={() => {
-              setReviewError(null);
-              setIsReviewModalOpen(true);
-            }}
-            leftIcon={<MessageSquarePlus className="w-4 h-4" />}
-          >
-            Write a Review
-          </Button>
+          {userReview ? (
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => handleOpenReviewModal('edit')}
+              leftIcon={<Edit2 className="w-4 h-4" />}
+            >
+              Edit Your Review
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => handleOpenReviewModal('create')}
+              leftIcon={<MessageSquarePlus className="w-4 h-4" />}
+            >
+              Write a Review
+            </Button>
+          )}
         </div>
+
+        {/* Current User's Review Spotlight */}
+        {userReview && (
+          <div className="p-5 bg-emerald-50/70 rounded-2xl border border-emerald-200/80 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-emerald-950 uppercase tracking-wider">Your Review</span>
+                {userReview.is_approved ? (
+                  <Badge variant="success" size="sm" dot>Published</Badge>
+                ) : (
+                  <Badge variant="warning" size="sm" dot>Pending Moderation</Badge>
+                )}
+                {userReview.is_verified_purchase && (
+                  <Badge variant="success" size="sm">Verified Buyer</Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenReviewModal('edit')}
+                  leftIcon={<Edit2 className="w-3.5 h-3.5" />}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsDeleteModalOpen(true)}
+                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                  leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <RatingStars rating={userReview.rating} size="xs" showScore={false} />
+                <span className="text-[11px] text-gray-400">
+                  {userReview.created_at ? new Date(userReview.created_at).toLocaleDateString() : 'Recent'}
+                </span>
+              </div>
+              {userReview.title && <h4 className="text-xs font-bold text-gray-900 mb-1">{userReview.title}</h4>}
+              <p className="text-xs text-gray-700 leading-relaxed italic">
+                "{userReview.comment}"
+              </p>
+              {!userReview.is_approved && (
+                <p className="text-[11px] text-amber-700 mt-2 flex items-center gap-1 font-medium">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Your review is currently pending moderation and will appear publicly once approved.</span>
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Reviews List */}
         {reviewsList.length === 0 ? (
@@ -472,7 +638,11 @@ export const ProductDetailPage = () => {
                 </div>
                 <div className="flex items-center justify-between pt-3 border-t border-gray-100 text-xs">
                   <span className="font-bold text-gray-900">{rev.author}</span>
-                  <Badge variant="success" size="sm" dot>Verified Owner</Badge>
+                  {rev.isVerifiedPurchase ? (
+                    <Badge variant="success" size="sm" dot>Verified Buyer</Badge>
+                  ) : (
+                    <span className="text-[11px] text-gray-400 font-medium">Community Review</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -495,11 +665,11 @@ export const ProductDetailPage = () => {
         </section>
       )}
 
-      {/* Review Submission Modal */}
+      {/* Review Submission & Editing Modal */}
       <Modal
         isOpen={isReviewModalOpen}
         onClose={() => setIsReviewModalOpen(false)}
-        title="Share Your Experience"
+        title={reviewMode === 'edit' ? "Edit Your Review" : "Share Your Experience"}
         description={`Reviewing ${product.title}`}
       >
         <form onSubmit={handleReviewSubmit} className="space-y-4">
@@ -558,11 +728,44 @@ export const ProductDetailPage = () => {
               Cancel
             </Button>
             <Button type="submit" variant="primary" size="md" isLoading={isSubmittingReview}>
-              Post Review
+              {reviewMode === 'edit' ? 'Save Changes' : 'Post Review'}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        title="Delete Your Review"
+        description="Are you sure you want to permanently delete your review for this product?"
+      >
+        <div className="space-y-4 pt-1">
+          <p className="text-xs text-gray-600 leading-relaxed">
+            This will permanently remove your rating and feedback from the catalog. You may write a new review at any time.
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              variant="ghost"
+              size="md"
+              onClick={() => setIsDeleteModalOpen(false)}
+            >
+              Keep Review
+            </Button>
+            <Button
+              variant="danger"
+              size="md"
+              isLoading={isDeletingReview}
+              onClick={handleDeleteReview}
+              leftIcon={<Trash2 className="w-4 h-4" />}
+            >
+              Delete Review
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 };

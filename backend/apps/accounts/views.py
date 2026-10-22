@@ -12,7 +12,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.common.permissions import IsOwnerOrAdmin
 from .models import Address
 from .cookies import set_jwt_cookies, clear_jwt_cookies
-from .services import send_password_reset_email
+from .services import send_password_reset_email, send_welcome_email
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
@@ -56,6 +56,9 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+
+        # Send welcome email (fail-safe)
+        send_welcome_email(user)
 
         # Generate JWT authentication tokens
         refresh = RefreshToken.for_user(user)

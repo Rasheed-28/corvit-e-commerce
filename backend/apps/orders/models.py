@@ -64,14 +64,23 @@ class Coupon(TimeStampedUUIDModel):
         return f"{self.code} ({val} off)"
 
     def is_valid_for_amount(self, order_amount: Decimal) -> bool:
+        return self.get_validation_error(order_amount) is None
+
+    def get_validation_error(self, order_amount: Decimal):
+        """Returns None if coupon is valid for order_amount, or a descriptive error string."""
         now = timezone.now()
-        if not self.is_active or now < self.valid_from or now > self.valid_to:
-            return False
+        if not self.is_active:
+            return "This coupon code is inactive."
+        if now < self.valid_from:
+            return "This coupon promotion has not started yet."
+        if now > self.valid_to:
+            return "This coupon has expired."
         if self.usage_limit is not None and self.times_used >= self.usage_limit:
-            return False
+            return "This coupon has reached its maximum usage limit."
         if order_amount < self.minimum_order_amount:
-            return False
-        return True
+            return f"Minimum order amount of ${self.minimum_order_amount} is required to apply this coupon."
+        return None
+
 
     def calculate_discount(self, subtotal: Decimal) -> Decimal:
         if not self.is_valid_for_amount(subtotal):

@@ -5,11 +5,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.db.models import F
 from apps.common.permissions import IsOwnerOrAdmin
 from apps.accounts.models import Address
 from apps.catalog.models import Inventory
 from apps.cart.models import Cart
 from .models import Coupon, Order, OrderItem, Payment
+from .services import send_order_confirmation_email, send_order_status_update_email
+
 from .serializers import (
     OrderListSerializer,
     OrderDetailSerializer,
@@ -264,7 +267,21 @@ class OrderListCreateView(generics.ListCreateAPIView):
                 'country': billing_addr_data.get('country', 'United States'),
             }
 
-        coupon_code = serializer.validated_data.get('coupon_code', '')
+        coupon_code = serializer.validated_data.get('coupon_code', '').strip()
+        coupon_obj = None
+        if coupon_code:
+            try:
+                coupon_obj = Coupon.objects.get(code__iexact=coupon_code)
+            except Coupon.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'error': {
+                        'code': 'INVALID_COUPON',
+                        'message': f"Coupon code '{coupon_code}' is invalid or expired.",
+                        'details': None
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         payment_method = serializer.validated_data.get('payment_method', Payment.PaymentMethod.CREDIT_CARD)
 
         with transaction.atomic():
@@ -320,13 +337,27 @@ class OrderListCreateView(generics.ListCreateAPIView):
                     'line_total': line_total,
                 })
 
-            financials = calculate_order_financials(cart_subtotal, coupon_code)
-            coupon = financials['coupon']
+            # Atomic coupon verification and usage increment
+            coupon = None
+            if coupon_obj:
+                locked_coupon = Coupon.objects.select_for_update().get(id=coupon_obj.id)
+                coupon_err = locked_coupon.get_validation_error(cart_subtotal)
+                if coupon_err:
+                    return Response({
+                        'success': False,
+                        'error': {
+                            'code': 'INVALID_COUPON',
+                            'message': coupon_err,
+                            'details': None
+                        }
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Increment coupon usage count
-            if coupon:
-                coupon.times_used += 1
-                coupon.save(update_fields=['times_used', 'updated_at'])
+                locked_coupon.times_used = F('times_used') + 1
+                locked_coupon.save(update_fields=['times_used', 'updated_at'])
+                locked_coupon.refresh_from_db()
+                coupon = locked_coupon
+
+            financials = calculate_order_financials(cart_subtotal, coupon.code if coupon else '')
 
             initial_status = Order.OrderStatus.PENDING
             if payment_method == Payment.PaymentMethod.CASH_ON_DELIVERY:
@@ -364,11 +395,14 @@ class OrderListCreateView(generics.ListCreateAPIView):
                     currency=order.currency,
                     gateway_response={'type': 'cash_on_delivery', 'message': 'Payment will be collected upon courier delivery.'}
                 )
+                # Dispatch order confirmation email immediately for COD
+                send_order_confirmation_email(order)
 
             # Deactivate shopping cart
             cart.items.all().delete()
             cart.is_active = False
             cart.save(update_fields=['is_active', 'updated_at'])
+
 
         return Response({
             'success': True,
@@ -415,6 +449,7 @@ class OrderDetailView(generics.RetrieveUpdateAPIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         instance = self.get_object()
+        old_status = instance.status
         new_status = request.data.get('status')
         if new_status:
             if new_status not in Order.OrderStatus.values:
@@ -428,6 +463,8 @@ class OrderDetailView(generics.RetrieveUpdateAPIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             instance.status = new_status
             instance.save(update_fields=['status', 'updated_at'])
+            if old_status != new_status:
+                send_order_status_update_email(instance, old_status, new_status)
 
         serializer = self.get_serializer(instance)
         return Response({
@@ -435,6 +472,7 @@ class OrderDetailView(generics.RetrieveUpdateAPIView):
             'message': 'Order updated successfully.',
             'data': serializer.data
         })
+
 
 
 class OrderCancelView(APIView):
@@ -477,6 +515,8 @@ class OrderCancelView(APIView):
                 }
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        prev_status = order.status
+
         with transaction.atomic():
             # Apply row-level lock on order
             locked_order = Order.objects.select_for_update().get(id=order.id)
@@ -506,11 +546,13 @@ class OrderCancelView(APIView):
             locked_order.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
 
         locked_order.refresh_from_db()
+        send_order_status_update_email(locked_order, prev_status, Order.OrderStatus.CANCELLED, reason=reason)
         return Response({
             'success': True,
             'message': 'Order successfully cancelled and inventory restored.',
             'data': OrderDetailSerializer(locked_order, context={'request': request}).data
         }, status=status.HTTP_200_OK)
+
 
 
 class ValidateCouponView(APIView):

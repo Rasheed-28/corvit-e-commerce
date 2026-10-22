@@ -693,6 +693,7 @@ class AdminOrderStatusUpdateView(APIView):
 
         new_status = serializer.validated_data['status']
         reason = serializer.validated_data.get('reason', '')
+        prev_status = order.status
 
         with transaction.atomic():
             locked_order = Order.objects.select_for_update().get(id=order.id)
@@ -712,11 +713,21 @@ class AdminOrderStatusUpdateView(APIView):
             locked_order.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
 
         locked_order.refresh_from_db()
+
+        # Send customer notification email for status transition
+        if prev_status != new_status:
+            try:
+                from apps.orders.services import send_order_status_update_email
+                send_order_status_update_email(locked_order, prev_status, new_status, reason=reason)
+            except Exception as mail_exc:
+                pass
+
         return Response({
             'success': True,
             'message': f"Order {order_number} status updated to '{new_status}'.",
             'data': AdminOrderDetailSerializer(locked_order).data
         })
+
 
 
 # ==============================================================================

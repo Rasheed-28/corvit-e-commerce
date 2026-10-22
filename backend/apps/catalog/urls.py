@@ -12,6 +12,7 @@ from .views import (
     ProductImageDetailView,
     ProductReviewListCreateView,
     ProductReviewDetailView,
+    ProductUserReviewView,
 )
 
 app_name = 'catalog'
@@ -38,6 +39,8 @@ urlpatterns = [
     path('images/<uuid:id>/', ProductImageDetailView.as_view(), name='image-detail'),
 
     # Reviews
+    path('products/<str:slug>/reviews/mine/', ProductUserReviewView.as_view(), name='product-user-review'),
     path('products/<str:slug>/reviews/', ProductReviewListCreateView.as_view(), name='product-review-list-create'),
     path('reviews/<uuid:id>/', ProductReviewDetailView.as_view(), name='review-detail'),
 ]
+
