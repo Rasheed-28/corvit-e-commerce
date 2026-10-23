@@ -28,7 +28,14 @@ def get_or_create_cart(request) -> Cart:
     Automatically merges anonymous guest cart into user cart if customer is authenticated.
     """
     if request.user.is_authenticated:
-        cart, _ = Cart.objects.get_or_create(user=request.user, is_active=True)
+        cart = Cart.objects.filter(user=request.user, is_active=True).first()
+        if not cart:
+            cart = Cart.objects.create(user=request.user, is_active=True)
+        # Deactivate any duplicate active carts if they exist
+        other_active = Cart.objects.filter(user=request.user, is_active=True).exclude(id=cart.id)
+        if other_active.exists():
+            other_active.update(is_active=False)
+
         # Check if an anonymous guest cart is present to merge
         session_key = get_cart_session_key(request)
         if session_key:
@@ -48,7 +55,12 @@ def get_or_create_cart(request) -> Cart:
         else:
             session_key = uuid.uuid4().hex
 
-    cart, _ = Cart.objects.get_or_create(session_key=session_key, user__isnull=True, is_active=True)
+    cart = Cart.objects.filter(session_key=session_key, user__isnull=True, is_active=True).first()
+    if not cart:
+        cart = Cart.objects.create(session_key=session_key, user=None, is_active=True)
+    other_guest_active = Cart.objects.filter(session_key=session_key, user__isnull=True, is_active=True).exclude(id=cart.id)
+    if other_guest_active.exists():
+        other_guest_active.update(is_active=False)
     return cart
 
 
@@ -61,11 +73,11 @@ def merge_guest_cart_into_user(session_key: str, user) -> Cart:
         return None
 
     guest_cart = Cart.objects.filter(session_key=session_key, user__isnull=True, is_active=True).first()
+    user_cart = Cart.objects.filter(user=user, is_active=True).first()
+    if not user_cart:
+        user_cart = Cart.objects.create(user=user, is_active=True)
     if not guest_cart:
-        user_cart, _ = Cart.objects.get_or_create(user=user, is_active=True)
         return user_cart
-
-    user_cart, _ = Cart.objects.get_or_create(user=user, is_active=True)
     if guest_cart.id == user_cart.id:
         return user_cart
 

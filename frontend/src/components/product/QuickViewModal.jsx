@@ -17,10 +17,8 @@ export const QuickViewModal = ({
   onClose,
   product,
 }) => {
-  if (!product) return null;
-
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [selectedColor, setSelectedColor] = useState(product.colors?.[0]?.name || null);
+  const [selectedColor, setSelectedColor] = useState(null);
   const [quantity, setQuantity] = useState(1);
   const [isAdding, setIsAdding] = useState(false);
   const [added, setAdded] = useState(false);
@@ -35,6 +33,8 @@ export const QuickViewModal = ({
       setAdded(false);
     }
   }, [product]);
+
+  if (!product) return null;
 
   const images = product.images && product.images.length > 0
     ? product.images

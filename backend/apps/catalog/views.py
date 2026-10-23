@@ -302,7 +302,7 @@ class ProductVariantListCreateView(APIView):
     Public listing of active variants or administrative variant creation.
     """
     def get_permissions(self):
-        if self.request.method == 'POST':
+        if self.request and self.request.method == 'POST':
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
 
@@ -374,7 +374,7 @@ class ProductImageListCreateView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get_permissions(self):
-        if self.request.method == 'POST':
+        if self.request and self.request.method == 'POST':
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
 
@@ -546,7 +546,7 @@ class ProductReviewDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Review.objects.all()
 
     def get_permissions(self):
-        if self.request.method in permissions.SAFE_METHODS:
+        if self.request and self.request.method in permissions.SAFE_METHODS:
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated(), IsOwnerOrAdmin()]
 

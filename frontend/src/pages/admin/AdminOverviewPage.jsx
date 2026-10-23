@@ -17,6 +17,7 @@ import {
   ArrowUpRight,
   Boxes,
   CheckCircle2,
+  ChevronRight,
 } from 'lucide-react';
 
 const PERIODS = [

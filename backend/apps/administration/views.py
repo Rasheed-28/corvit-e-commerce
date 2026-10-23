@@ -292,7 +292,7 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_serializer_class(self):
-        if self.request.method == 'POST':
+        if self.request and self.request.method == 'POST':
             return AdminProductCreateUpdateSerializer
         return AdminProductListSerializer
 
@@ -359,7 +359,7 @@ class AdminProductDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Product.objects.all().select_related('category').prefetch_related('images', 'variants__inventory')
 
     def get_serializer_class(self):
-        if self.request.method in ('PUT', 'PATCH'):
+        if self.request and self.request.method in ('PUT', 'PATCH'):
             return AdminProductCreateUpdateSerializer
         return AdminProductDetailSerializer
 
