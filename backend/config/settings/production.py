@@ -14,15 +14,26 @@ if not os.environ.get('DJANGO_SECRET_KEY') or SECRET_KEY == 'django-insecure-dev
     raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set to a secure, unique value in production.")
 
 # Production PostgreSQL Database
-DB_NAME = os.environ.get('DB_NAME')
-DB_USER = os.environ.get('DB_USER')
-DB_PASSWORD = os.environ.get('DB_PASSWORD')
-DB_HOST = os.environ.get('DB_HOST')
-DB_PORT = os.environ.get('DB_PORT', '5432')
+# Supports either a unified DATABASE_URL (standard on PaaS like Render, Railway, Heroku)
+# or individual DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT variables.
+if os.environ.get('DATABASE_URL'):
+    from urllib.parse import urlparse, unquote
+    db_url = urlparse(os.environ['DATABASE_URL'])
+    DB_NAME = db_url.path.lstrip('/')
+    DB_USER = unquote(db_url.username or '')
+    DB_PASSWORD = unquote(db_url.password or '')
+    DB_HOST = db_url.hostname or ''
+    DB_PORT = str(db_url.port or '5432')
+else:
+    DB_NAME = os.environ.get('DB_NAME')
+    DB_USER = os.environ.get('DB_USER')
+    DB_PASSWORD = os.environ.get('DB_PASSWORD')
+    DB_HOST = os.environ.get('DB_HOST')
+    DB_PORT = os.environ.get('DB_PORT', '5432')
 
 if not all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST]):
     raise ImproperlyConfigured(
-        "Production environment strictly requires PostgreSQL. DB_NAME, DB_USER, DB_PASSWORD, and DB_HOST must be set."
+        "Production environment strictly requires PostgreSQL. Configure either DATABASE_URL or DB_NAME, DB_USER, DB_PASSWORD, and DB_HOST."
     )
 
 DATABASES = {
@@ -62,4 +73,26 @@ SECURE_HSTS_PRELOAD = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [h.strip() for h in os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',') if h.strip()]
 CSRF_TRUSTED_ORIGINS = [h.strip() for h in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if h.strip()]
+
+# Production Static Files Storage with WhiteNoise
+STORAGES = {
+    'default': {
+        'BACKEND': os.environ.get(
+            'DEFAULT_FILE_STORAGE',
+            'django.core.files.storage.FileSystemStorage'
+        ),
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
+
+# Media asset configuration (persistent disk or object storage)
+if os.environ.get('MEDIA_ROOT'):
+    MEDIA_ROOT = Path(os.environ['MEDIA_ROOT'])
+if os.environ.get('MEDIA_URL'):
+    MEDIA_URL = os.environ['MEDIA_URL']
+
+# Allow explicit media serving in production if using persistent disk on single-container PaaS
+SERVE_MEDIA_FILES = os.environ.get('SERVE_MEDIA_FILES', 'False').lower() in ('true', '1', 'yes')
 

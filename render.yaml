@@ -1,0 +1,117 @@
+# ==============================================================================
+# Render Blueprint Specification (render.yaml)
+# Unified deployment orchestration for NovaStore Full-Stack E-Commerce Platform
+# Services:
+#   1. novastore-backend  : Django REST Framework API (Python / Gunicorn)
+#   2. novastore-frontend : React SPA (Vite / Static Site)
+#   3. novastore-postgres : Managed PostgreSQL 16 Database
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Backend Web Service (Django REST Framework)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: novastore-backend
+    runtime: python
+    rootDir: backend
+    plan: starter
+    region: oregon # Adjust to your target region (e.g. frankfurt, oregon, ohio, singapore)
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --no-input
+    preDeployCommand: python manage.py migrate --no-input
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --timeout 120 --access-logfile - --error-logfile -
+    healthCheckPath: /api/v1/common/health/
+    disk:
+      name: novastore-media
+      mountPath: /data/media
+      sizeGB: 10
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: novastore-postgres
+          property: connectionString
+      - key: ALLOWED_HOSTS
+        sync: false # Set in Render dashboard: e.g. novastore-backend.onrender.com,api.yourdomain.com
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # Set in Render dashboard: e.g. https://novastore-frontend.onrender.com,https://yourdomain.com
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false # Set in Render dashboard: e.g. https://novastore-frontend.onrender.com,https://yourdomain.com
+      - key: FRONTEND_URL
+        sync: false # Set in Render dashboard: e.g. https://yourdomain.com
+      - key: MEDIA_ROOT
+        value: /data/media
+      - key: SERVE_MEDIA_FILES
+        value: "true"
+      - key: PAYMENT_GATEWAY
+        value: simulated # Change to 'stripe' after verifying live merchant credentials
+      - key: SIMULATED_WEBHOOK_SECRET
+        generateValue: true
+      - key: STRIPE_SECRET_KEY
+        sync: false # Sensitive secret: inject via Render Dashboard or Secret Group
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_BACKEND
+        value: django.core.mail.backends.smtp.EmailBackend
+      - key: EMAIL_HOST
+        sync: false # e.g. smtp.sendgrid.net or email-smtp.us-east-1.amazonaws.com
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USE_TLS
+        value: "true"
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false # e.g. orders@yourdomain.com
+
+  # ----------------------------------------------------------------------------
+  # 2. Frontend Static Site (React 18 + Vite SPA)
+  # ----------------------------------------------------------------------------
+  - type: static
+    name: novastore-frontend
+    rootDir: frontend
+    plan: starter
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false # Set in dashboard: e.g. https://novastore-backend.onrender.com/api/v1
+      - key: VITE_APP_TITLE
+        value: NovaStore E-Commerce
+    routes:
+      # SPA rewrite rule: route all customer-facing navigation to index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+databases:
+  # ----------------------------------------------------------------------------
+  # 3. Managed PostgreSQL Database
+  # ----------------------------------------------------------------------------
+  - name: novastore-postgres
+    plan: starter
+    databaseName: novastore_prod
+    user: novastore_admin
+    ipAllowList: [] # Strict isolation: accept connections exclusively from internal services

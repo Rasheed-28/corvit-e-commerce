@@ -14,6 +14,6 @@ urlpatterns = [
     path('api/v1/admin/', include('apps.administration.urls')),
 ]
 
-# Serve media files in local development
-if settings.DEBUG:
+# Serve media files in local development or when SERVE_MEDIA_FILES is explicitly enabled
+if settings.DEBUG or getattr(settings, 'SERVE_MEDIA_FILES', False):
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
