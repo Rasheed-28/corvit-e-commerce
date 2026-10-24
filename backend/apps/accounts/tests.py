@@ -1,4 +1,9 @@
+import io
 from decimal import Decimal
+from PIL import Image
+from django.conf import settings
+from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -10,6 +15,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 
 from apps.accounts.models import Address, CustomerProfile
+from apps.accounts.serializers import CustomerProfileSerializer
 from apps.catalog.models import ProductCategory, Product, Review
 from apps.cart.models import Cart, CartItem
 from apps.orders.models import Order
@@ -638,3 +644,79 @@ class AuthenticationAndAuthorizationTests(TestCase):
         del_resp = self.client.delete(url)
         self.assertEqual(del_resp.status_code, status.HTTP_200_OK)
         self.assertFalse(Review.objects.filter(id=review_a.id).exists())
+
+
+class SecurityHardeningTests(TestCase):
+    """
+    Regression tests verifying abuse rate limiting and image upload validation.
+    """
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username='security_test_user',
+            email='secuser@example.com',
+            password='StrongPassword123!',
+        )
+        self.profile, _ = CustomerProfile.objects.get_or_create(user=self.user)
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    def _create_test_image(self, name='avatar.png', fmt='PNG'):
+        file = io.BytesIO()
+        img = Image.new('RGB', (50, 50), color='green')
+        img.save(file, format=fmt)
+        file.seek(0)
+        return SimpleUploadedFile(name, file.read(), content_type=f'image/{fmt.lower()}')
+
+    # 1. Rate Limiting Tests
+    def test_login_rate_limiting(self):
+        from unittest.mock import patch
+        with patch.dict('rest_framework.throttling.ScopedRateThrottle.THROTTLE_RATES', {'auth': '2/minute'}):
+            url = reverse('accounts:login')
+            payload = {'username': 'security_test_user', 'password': 'WrongPassword!'}
+
+            r1 = self.client.post(url, payload, format='json')
+            self.assertEqual(r1.status_code, status.HTTP_401_UNAUTHORIZED)
+            r2 = self.client.post(url, payload, format='json')
+            self.assertEqual(r2.status_code, status.HTTP_401_UNAUTHORIZED)
+
+            # 3rd attempt is throttled
+            r3 = self.client.post(url, payload, format='json')
+            self.assertEqual(r3.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_password_reset_rate_limiting(self):
+        from unittest.mock import patch
+        with patch.dict('rest_framework.throttling.ScopedRateThrottle.THROTTLE_RATES', {'password_reset': '2/minute'}):
+            url = reverse('accounts:password-reset-request')
+            payload = {'email': 'secuser@example.com'}
+
+            r1 = self.client.post(url, payload, format='json')
+            self.assertEqual(r1.status_code, status.HTTP_200_OK)
+            r2 = self.client.post(url, payload, format='json')
+            self.assertEqual(r2.status_code, status.HTTP_200_OK)
+
+            # 3rd attempt is throttled
+            r3 = self.client.post(url, payload, format='json')
+            self.assertEqual(r3.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    # 2. Avatar Upload Validation Tests
+    def test_avatar_valid_image_accepted(self):
+        valid_img = self._create_test_image('avatar.jpg', 'JPEG')
+        serializer = CustomerProfileSerializer(instance=self.profile, data={'avatar': valid_img}, partial=True)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        updated = serializer.save()
+        self.assertTrue(bool(updated.avatar))
+
+    def test_avatar_invalid_extension_rejected(self):
+        fake_file = SimpleUploadedFile('script.py', b'print("hello")', content_type='text/x-python')
+        serializer = CustomerProfileSerializer(instance=self.profile, data={'avatar': fake_file}, partial=True)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('avatar', serializer.errors)
+
+    def test_avatar_corrupted_payload_rejected(self):
+        corrupted_file = SimpleUploadedFile('corrupt.jpg', b'fake image header with corrupt payload', content_type='image/jpeg')
+        serializer = CustomerProfileSerializer(instance=self.profile, data={'avatar': corrupted_file}, partial=True)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('avatar', serializer.errors)

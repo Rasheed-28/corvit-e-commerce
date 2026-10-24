@@ -1,8 +1,9 @@
 import uuid
 from decimal import Decimal
 from datetime import timedelta
+from django.conf import settings
 from django.core import mail
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -696,4 +697,22 @@ class OrdersWorkflowTests(TestCase):
         sent = mail.outbox[0]
         self.assertIn(f"Order #{order.order_number} Update: Shipped", sent.subject)
         self.assertIn(self.buyer.email, sent.to)
+
+    def test_coupon_validation_rate_limiting(self):
+        from unittest.mock import patch
+        from django.core.cache import cache
+        cache.clear()
+        with patch.dict('rest_framework.throttling.ScopedRateThrottle.THROTTLE_RATES', {'coupons': '2/minute'}):
+            url = reverse('orders:coupon-validate')
+            payload = {'code': 'INVALID1', 'subtotal': '100.00'}
+
+            r1 = self.client.post(url, payload, format='json')
+            self.assertEqual(r1.status_code, status.HTTP_400_BAD_REQUEST)
+            r2 = self.client.post(url, payload, format='json')
+            self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
+
+            # 3rd request is throttled
+            r3 = self.client.post(url, payload, format='json')
+            self.assertEqual(r3.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        cache.clear()
 

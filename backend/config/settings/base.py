@@ -201,6 +201,18 @@ REST_FRAMEWORK = {
     ],
     'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%SZ',
     'NON_FIELD_ERRORS_KEY': 'non_field_errors',
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.environ.get('DRF_THROTTLE_ANON', '120/minute'),
+        'user': os.environ.get('DRF_THROTTLE_USER', '1000/minute'),
+        'auth': os.environ.get('DRF_THROTTLE_AUTH', '60/minute'),
+        'password_reset': os.environ.get('DRF_THROTTLE_PASSWORD_RESET', '20/minute'),
+        'coupons': os.environ.get('DRF_THROTTLE_COUPONS', '30/minute'),
+    },
 }
 
 if DEBUG:

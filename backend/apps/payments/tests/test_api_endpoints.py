@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from unittest.mock import patch
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework import status
@@ -156,3 +157,27 @@ class PaymentAPIEndpointsTests(TestCase):
 
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.OrderStatus.PAID)
+
+    @patch('apps.payments.services.PaymentService.process_webhook_event')
+    def test_webhook_unexpected_exception_sanitizes_error_message(self, mock_process):
+        mock_process.side_effect = RuntimeError("Sensitive DB internal error: user=admin password=secret_token")
+        from apps.payments.adapters.factory import get_payment_adapter
+        adapter = get_payment_adapter('simulated')
+        payload = b'{"dummy": true}'
+        sig = adapter.generate_webhook_signature(payload)
+
+        response = self.client.post(
+            '/api/v1/payments/webhook/simulated/',
+            data=payload,
+            content_type='application/json',
+            HTTP_X_WEBHOOK_SIGNATURE=sig
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(response.data['success'])
+        self.assertEqual(response.data['error']['code'], 'WEBHOOK_PROCESSING_ERROR')
+        self.assertEqual(
+            response.data['error']['message'],
+            'An unexpected error occurred while processing the webhook event.'
+        )
+        self.assertNotIn("secret_token", response.data['error']['message'])
+        self.assertNotIn("Sensitive DB", response.data['error']['message'])

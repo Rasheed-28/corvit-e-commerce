@@ -303,11 +303,11 @@ class PaymentWebhookView(APIView):
                 }
             }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
-            payment_logger.error(f"[WebhookReceiver] Unexpected error processing webhook: {exc}")
+            payment_logger.error(f"[WebhookReceiver] Unexpected error processing webhook: {exc}", exc_info=True)
             return Response({
                 'success': False,
                 'error': {
                     'code': 'WEBHOOK_PROCESSING_ERROR',
-                    'message': str(exc)
+                    'message': 'An unexpected error occurred while processing the webhook event.'
                 }
             }, status=status.HTTP_400_BAD_REQUEST)

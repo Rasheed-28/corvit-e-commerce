@@ -34,7 +34,9 @@ describe('Checkout & Order Management End-to-End Workflow Tests', () => {
     assert.equal(catRes.success, true);
     catalogProduct = catRes.data;
     assert.ok(catalogProduct.variants && catalogProduct.variants.length > 0);
-    catalogVariant = catalogProduct.variants[0];
+    catalogVariant =
+      catalogProduct.variants.find((v) => (v.available_quantity || v.quantity || 0) > 0) ||
+      catalogProduct.variants[0];
 
     // 4. Ensure customer cart has items
     await cartApi.addToCart({

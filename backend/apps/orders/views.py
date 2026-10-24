@@ -3,6 +3,7 @@ from decimal import Decimal
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import F
@@ -560,6 +561,8 @@ class ValidateCouponView(APIView):
     Validates a promotional coupon code against an order subtotal.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'coupons'
 
     def post(self, request):
         serializer = ValidateCouponSerializer(data=request.data)

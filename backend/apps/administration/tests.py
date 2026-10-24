@@ -1,7 +1,10 @@
+import io
 import json
 import uuid
 from decimal import Decimal
 from datetime import timedelta
+from PIL import Image
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -12,6 +15,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import Address, CustomerProfile
 from apps.catalog.models import ProductCategory, Product, ProductVariant, Inventory, ProductImage, Review
 from apps.orders.models import Coupon, Order, OrderItem, Payment
+from apps.administration.serializers import AdminCategorySerializer, AdminProductImageSerializer
 
 User = get_user_model()
 
@@ -451,3 +455,54 @@ class AdminReviewModerationTests(AdminBaseTestCase):
         del_resp = self.client.delete(f'/api/v1/admin/reviews/{self.review.id}/')
         self.assertEqual(del_resp.status_code, status.HTTP_200_OK)
         self.assertFalse(Review.objects.filter(id=self.review.id).exists())
+
+
+class AdminMediaValidationTests(AdminBaseTestCase):
+    def _create_test_image(self, name='image.png', fmt='PNG'):
+        file = io.BytesIO()
+        img = Image.new('RGB', (100, 100), color='purple')
+        img.save(file, format=fmt)
+        file.seek(0)
+        return SimpleUploadedFile(name, file.read(), content_type=f'image/{fmt.lower()}')
+
+    def test_admin_category_valid_image_accepted(self):
+        valid_img = self._create_test_image('category.jpg', 'JPEG')
+        serializer = AdminCategorySerializer(data={
+            'name': 'Home Appliances',
+            'slug': 'home-appliances',
+            'image': valid_img
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        cat = serializer.save()
+        self.assertTrue(bool(cat.image))
+
+    def test_admin_category_invalid_file_rejected(self):
+        fake_file = SimpleUploadedFile('malicious.sh', b'#!/bin/bash\nrm -rf /', content_type='text/x-shellscript')
+        serializer = AdminCategorySerializer(data={
+            'name': 'Invalid Media Category',
+            'slug': 'invalid-media',
+            'image': fake_file
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('image', serializer.errors)
+
+    def test_admin_product_image_valid_upload(self):
+        valid_img = self._create_test_image('prod_img.png', 'PNG')
+        serializer = AdminProductImageSerializer(data={
+            'product': self.product.id,
+            'image': valid_img,
+            'alt_text': 'Valid Product View'
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        pimg = serializer.save()
+        self.assertTrue(bool(pimg.image))
+
+    def test_admin_product_image_corrupted_file_rejected(self):
+        corrupt_file = SimpleUploadedFile('bad.png', b'not a valid png file stream', content_type='image/png')
+        serializer = AdminProductImageSerializer(data={
+            'product': self.product.id,
+            'image': corrupt_file,
+            'alt_text': 'Corrupt View'
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('image', serializer.errors)

@@ -53,6 +53,16 @@ class AdminCategorySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f"Category slug '{slug}' is already in use.")
         return slug
 
+    def validate_image(self, value):
+        if value:
+            from apps.catalog.validators import validate_image_file
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            try:
+                validate_image_file(value)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(list(exc.messages) if hasattr(exc, 'messages') else str(exc))
+        return value
+
     def validate(self, attrs):
         parent = attrs.get('parent')
         if self.instance and parent:
@@ -78,6 +88,16 @@ class AdminProductImageSerializer(serializers.ModelSerializer):
             'created_at',
         ]
         read_only_fields = ['id', 'created_at', 'image_url']
+
+    def validate_image(self, value):
+        if value:
+            from apps.catalog.validators import validate_image_file
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            try:
+                validate_image_file(value)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(list(exc.messages) if hasattr(exc, 'messages') else str(exc))
+        return value
 
     def get_image_url(self, obj) -> str | None:
         if obj.image:

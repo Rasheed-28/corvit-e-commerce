@@ -73,7 +73,8 @@ describe('Full End-to-End Customer & Administrator Lifecycle Journey', () => {
 
     assert.ok(searchedProduct.variants && searchedProduct.variants.length > 0, 'Product has active variants');
     selectedVariant =
-      searchedProduct.variants.find((v) => (v.stock || v.available_stock || 0) >= 5) ||
+      searchedProduct.variants.find((v) => (v.available_quantity || v.available_stock || v.stock || v.quantity || 0) >= 5) ||
+      searchedProduct.variants.find((v) => (v.available_quantity || v.available_stock || v.stock || v.quantity || 0) >= 2) ||
       searchedProduct.variants[0];
   });
 

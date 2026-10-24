@@ -20,6 +20,16 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
         model = CustomerProfile
         fields = ('phone_number', 'avatar', 'date_of_birth', 'is_newsletter_subscribed')
 
+    def validate_avatar(self, value):
+        if value:
+            from apps.catalog.validators import validate_image_file
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            try:
+                validate_image_file(value)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(list(exc.messages) if hasattr(exc, 'messages') else str(exc))
+        return value
+
 
 class UserProfileSerializer(serializers.ModelSerializer):
     profile = CustomerProfileSerializer(source='customer_profile', required=False)

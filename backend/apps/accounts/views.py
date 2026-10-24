@@ -1,6 +1,7 @@
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import update_last_login
 from django.utils.decorators import method_decorator
@@ -51,6 +52,8 @@ class RegisterView(APIView):
     Sets secure HttpOnly JWT cookies and returns user summary and tokens.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -89,6 +92,8 @@ class LoginView(APIView):
     auth cookies and returns standard envelope with user metadata and tokens.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={'request': request})
@@ -298,6 +303,8 @@ class PasswordResetRequestView(APIView):
     Guards against email enumeration by returning identical generic success envelopes.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'password_reset'
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
@@ -321,6 +328,8 @@ class PasswordResetConfirmView(APIView):
     Token is invalidated immediately upon successful password change.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'password_reset'
 
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
